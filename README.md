@@ -60,6 +60,23 @@ The container will:
 docker build -t comfyui-anime-bootstrap .
 ```
 
+## Running Integration Tests
+
+The test suite spins up a container with docker-py and verifies boot, SSH, ComfyUI API, and workspace layout.
+
+```bash
+# 1. Build the image
+docker build -t comfyui-anime-bootstrap:test .
+
+# 2. Install test deps
+pip install -r tests/requirements.txt
+
+# 3. Run tests
+pytest tests/integration_test.py -v --timeout=300
+```
+
+In CI, tests execute against the freshly built `load: true` image **before** pushing to GHCR.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0), matching the upstream ComfyUI license.
