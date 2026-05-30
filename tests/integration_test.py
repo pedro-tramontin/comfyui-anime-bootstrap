@@ -30,6 +30,16 @@ BOOT_TIMEOUT = 120  # seconds for port to open
 SSH_TIMEOUT = 30    # seconds for SSH to be ready
 
 
+def has_gpu():
+    """Check if an NVIDIA GPU is available on the host."""
+    try:
+        import subprocess
+        result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=5)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
 @pytest.fixture(scope="session")
 def docker_client():
     return docker.from_env()
@@ -60,8 +70,6 @@ def container(docker_client, image_tag):
         },
         volumes={models_json_path: {"bind": "/workspace/models.json", "mode": "ro"}},
         environment={"DEBIAN_FRONTEND": "noninteractive"},
-        # No GPU needed for integration tests — we test boot logic, not inference
-        runtime=None,
         stdout=True,
         stderr=True,
     )
@@ -123,6 +131,9 @@ def test_comfyui_port_reachable(comfy_host_port):
 
 def test_comfyui_api_responds(container, comfy_host_port):
     """ComfyUI port returns some HTTP response."""
+    if not has_gpu():
+        pytest.skip("No GPU on this runner — ComfyUI cannot fully start")
+
     url = f"http://127.0.0.1:{comfy_host_port}/"
     deadline = time.time() + 30
     while time.time() < deadline:
@@ -137,9 +148,11 @@ def test_comfyui_api_responds(container, comfy_host_port):
             return
         except Exception:
             time.sleep(0.5)
-    # On CPU-only runners ComfyUI exits during CUDA init after the port opens.
-    # test_comfyui_port_reachable already verified the port is open.
-    pytest.skip("ComfyUI HTTP not fully ready (expected on CPU-only runners)")
+    # If we reach here on a GPU runner, the port opened but HTTP never replied.
+    container.reload()
+    if container.status != "running":
+        pytest.fail(f"ComfyUI exited unexpectedly (status={container.status})")
+    pytest.fail("ComfyUI HTTP port open but never responded")
 
 
 
