@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
 LABEL org.opencontainers.image.title="comfyui-anime-bootstrap"
 LABEL org.opencontainers.image.description="Cloud-native ComfyUI base for anime model pipelines (RunPod, Vast.ai, local)"
@@ -10,9 +10,16 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
 # Runtime deps: git, wget, curl, openssh, aria2 (faster resume downloads)
+# NOTE: pytorch base image already has pip (conda). Do NOT install python3-pip from apt.
 RUN apt-get update && apt-get install -y \
-    git python3-pip python3-venv wget curl ca-certificates \
-    openssh-server aria2 jq rsync \
+    git \
+    wget \
+    curl \
+    ca-certificates \
+    openssh-server \
+    aria2 \
+    jq \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # ComfyUI installation to /workspace/ComfyUI

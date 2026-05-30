@@ -113,7 +113,7 @@ def test_comfyui_port_reachable(comfy_host_port):
 def test_comfyui_api_returns_ok(comfy_host_port):
     """ComfyUI root path returns a valid HTTP response (redirect or 200)."""
     url = f"http://127.0.0.1:{comfy_host_port}/system_stats"
-    deadline = time.time() + 10
+    deadline = time.time() + 60  # ComfyUI needs ~20-40s after port open on first boot
     while time.time() < deadline:
         try:
             req = urllib.request.Request(url, method="GET")

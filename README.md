@@ -4,7 +4,7 @@ A cloud-native, GPU-ready Docker image for running ComfyUI with anime diffusion 
 
 ## Features
 
-- **Base OS**: `nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04`
+- **Base OS**: `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`
 - **Pre-installed**: ComfyUI + ComfyUI-Manager + aria2 (fast resume downloads)
 - **Model bootstrap**: `models.json` manifest for idempotent, resumable downloads
 - **SSH ready**: Host keys generated at container start (secure, no baked keys)
