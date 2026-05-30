@@ -37,7 +37,7 @@ fi
 
 # Download models idempotently
 echo "Checking model registry..."
-jq -c '.[] | .[]? // .' "$MANIFEST" 2>/dev/null | while IFS= read -r line; do
+jq -c '.[] | arrays | .[]' "$MANIFEST" 2>/dev/null | while IFS= read -r line; do
     name=$(echo "$line" | jq -r '.name')
     url=$(echo "$line" | jq -r '.url')
     dest_rel=$(echo "$line" | jq -r '.dest')

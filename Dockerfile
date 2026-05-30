@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
 
 LABEL org.opencontainers.image.title="comfyui-anime-bootstrap"
 LABEL org.opencontainers.image.description="Cloud-native ComfyUI base for anime model pipelines (RunPod, Vast.ai, local)"
@@ -47,7 +47,8 @@ RUN chmod +x /usr/local/bin/start.sh
 # SSH: generate hostkeys at runtime, not build time
 RUN mkdir -p /var/run/sshd /root/.ssh \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
-    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+    && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config \
+    && rm -f /etc/ssh/ssh_host_*
 
 EXPOSE 22 8188
 
