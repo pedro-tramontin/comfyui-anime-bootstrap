@@ -4,7 +4,7 @@ A cloud-native, GPU-ready Docker image for running ComfyUI with anime diffusion 
 
 ## Features
 
-- **Base OS**: `nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04`
+- **Base OS**: `pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime`
 - **Pre-installed**: ComfyUI + ComfyUI-Manager + aria2 (fast resume downloads)
 - **Model bootstrap**: `models.json` manifest for idempotent, resumable downloads
 - **SSH ready**: Host keys generated at container start (secure, no baked keys)
@@ -59,6 +59,23 @@ The container will:
 ```bash
 docker build -t comfyui-anime-bootstrap .
 ```
+
+## Running Integration Tests
+
+The test suite spins up a container with docker-py and verifies boot, SSH, ComfyUI API, and workspace layout.
+
+```bash
+# 1. Build the image
+docker build -t comfyui-anime-bootstrap:test .
+
+# 2. Install test deps
+pip install -r tests/requirements.txt
+
+# 3. Run tests
+pytest tests/integration_test.py -v --timeout=300
+```
+
+In CI, tests execute against the freshly built `load: true` image **before** pushing to GHCR.
 
 ## License
 
