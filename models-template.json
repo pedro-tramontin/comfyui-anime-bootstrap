@@ -1,0 +1,30 @@
+{
+  "checkpoints": [
+    {
+      "name": "Illustrious-XL-v0.1",
+      "url": "https://huggingface.co/OnomaAI/Illustrious-xl-early-release-v0/resolve/main/Illustrious-XL-v0.1.safetensors",
+      "dest": "checkpoints/Illustrious-XL-v0.1.safetensors",
+      "size": 6938292816,
+      "auth": "huggingface"
+    },
+    {
+      "name": "Pony-Diffusion-V6",
+      "url": "https://civitai.com/api/download/models/290640",
+      "dest": "checkpoints/ponyDiffusionV6XL.safetensors",
+      "size": 7105351680,
+      "auth": "civitai"
+    }
+  ],
+  "loras": [
+    {
+      "name": "Sadamoto-Asuka-LoRA",
+      "url": "https://civitai.com/api/download/models/123456",
+      "dest": "loras/sadamoto_asuka.safetensors",
+      "size": 359747424,
+      "auth": "civitai"
+    }
+  ],
+  "vae": [],
+  "text_encoders": [],
+  "controlnet": []
+}

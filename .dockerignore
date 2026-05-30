@@ -1,0 +1,8 @@
+.git
+.github
+README.md
+LICENSE
+*.md
+models-template.json
+bootstrap.sh
+start.sh
