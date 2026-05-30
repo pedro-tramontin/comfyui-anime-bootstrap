@@ -25,7 +25,7 @@ import docker
 IMAGE_NAME_DEFAULT = "comfyui-anime-bootstrap:test"
 COMFY_PORT = 8188
 SSH_PORT = 22
-BOOT_TIMEOUT = 120  # seconds for ComfyUI to start
+BOOT_TIMEOUT = 180  # seconds for ComfyUI to start (slower on GitHub Actions runners)
 SSH_TIMEOUT = 30    # seconds for SSH to be ready
 
 
@@ -37,7 +37,8 @@ def docker_client():
 @pytest.fixture(scope="session")
 def image_tag(request):
     """Allow overriding the image tag via CLI: pytest --image-tag=foo."""
-    return request.config.getoption("--image_tag", IMAGE_NAME_DEFAULT)
+    tag = request.config.getoption("--image-tag")
+    return tag if tag else IMAGE_NAME_DEFAULT
 
 
 @pytest.fixture(scope="session")

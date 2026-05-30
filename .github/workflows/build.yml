@@ -41,6 +41,9 @@ jobs:
           docker build -t "${{ env.TEST_TAG }}" .
           docker inspect "${{ env.TEST_TAG }}" > /dev/null && echo "Image verified in local daemon"
 
+      - name: Verify Docker available for tests
+        run: docker info && docker images | grep ${{ env.TEST_TAG }}
+
       - name: Run integration tests
         run: pytest tests/integration_test.py -v --image-tag=${{ env.TEST_TAG }}
         timeout-minutes: 10
