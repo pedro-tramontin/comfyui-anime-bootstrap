@@ -12,5 +12,5 @@
   "reviewers": [
     "pedro-tramontin"
   ],
-  "prBodyTemplate": "{{{header}}}{{{table}}}{{{warnings}}}{{{{notes}}}{{{changelogs}}}{{{configDescription}}}{{{footer}}}"
+  "prBodyTemplate": "{{{header}}}{{{table}}}{{{warnings}}}{{{notes}}}{{{changelogs}}}{{{configDescription}}}{{{footer}}}"
 }
