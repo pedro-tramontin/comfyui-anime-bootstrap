@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
 
 LABEL org.opencontainers.image.title="comfyui-anime-bootstrap"
 LABEL org.opencontainers.image.description="Cloud-native ComfyUI base for anime model pipelines (RunPod, Vast.ai, local)"
