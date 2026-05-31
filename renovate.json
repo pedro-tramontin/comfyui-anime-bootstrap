@@ -3,14 +3,18 @@
   "extends": [
     "config:recommended"
   ],
-  "baseBranches": ["main"],
+  "baseBranches": [
+    "main"
+  ],
   "dependencyDashboard": true,
-  "dockerfile": {
-    "fileMatch": ["Dockerfile$", "docker/Dockerfile$"]
-  },
   "automerge": false,
   "reviewers": [
     "pedro-tramontin"
   ],
-  "prBodyTemplate": "{{{header}}}{{{table}}}{{{warnings}}}{{{notes}}}{{{changelogs}}}{{{configDescription}}}{{{footer}}}"
+  "prHourlyLimit": 2,
+  "rangeStrategy": "bump",
+  "rebaseWhen": "conflicted",
+  "labels": [
+    "dependencies"
+  ]
 }
