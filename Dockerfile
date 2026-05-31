@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
 # ComfyUI installation to /workspace/ComfyUI
 ENV COMFYUI_DIR=/workspace/ComfyUI
 RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI "$COMFYUI_DIR" \
-    && pip install --no-cache-dir -r "$COMFYUI_DIR/requirements.txt"
+    && pip install --break-system-packages --no-cache-dir -r "$COMFYUI_DIR/requirements.txt"
 
 # ComfyUI-Manager
 RUN git clone --depth 1 https://github.com/ltdrdata/ComfyUI-Manager \
