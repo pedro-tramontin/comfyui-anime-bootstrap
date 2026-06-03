@@ -1,36 +1,58 @@
 {
   "checkpoints": [
     {
-      "name": "animagine-xl-3.1",
-      "url": "https://huggingface.co/cagliostrolab/animagine-xl-3.1/resolve/main/animagine-xl-3.1.safetensors",
-      "dest": "checkpoints/animagineXLV31_v31.safetensors",
-      "size": 6938400000,
-      "auth": "none"
+      "name": "animagine-xl-4.0",
+      "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
+      "dest": "checkpoints/animagine-xl-4.0.safetensors",
+      "size": 6938040794,
+      "auth": "huggingface",
+      "note": "Public HF repo, no auth strictly required, but the bootstrap script always sends the Authorization header when auth=huggingface."
     },
     {
-      "name": "Pony-Diffusion-V6-XL",
-      "url": "https://huggingface.co/AstraliteHeart/pony-diffusion-v6-xl/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
+      "name": "pony-diffusion-v6-xl",
+      "url": "https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
       "dest": "checkpoints/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
-      "size": 6938400000,
-      "auth": "huggingface"
+      "size": 6938040794,
+      "auth": "huggingface",
+      "note": "LyliaEngine mirror of AstraliteHeart/pony-diffusion-v6-xl. The original AstraliteHeart repo 404s as of 2026-06; LyliaEngine is the maintained 200k-download mirror."
     },
     {
-      "name": "Illustrious-XL-v0.1",
-      "url": "https://huggingface.co/Illustrious-XL/Illustrious-XL-0.1/resolve/main/Illustrious-XL-v0.1.safetensors",
-      "dest": "checkpoints/Illustrious-XL-v0.1.safetensors",
-      "size": 6938400000,
-      "auth": "none"
+      "name": "illumiyume-xl-v3.5",
+      "url": "https://civitai.com/api/download/models/1887507?token=${CIVITAI_API_KEY}",
+      "dest": "checkpoints/illumiyumeXL_v35VPred.safetensors",
+      "size": 6938040794,
+      "auth": "civitai",
+      "note": "IllumiYume XL v3.5 (v-pred) -- 2026-05-08 release. v3.5 is v-pred; ComfyUI KSampler should use sampler_name='dpmpp_2m' scheduler='karras' denoise=1.0 cfg=7.0 (matches the SDXL convention). 307-redirects to B2 with a 15-min signed URL. The token is interpolated at download time from the CIVITAI_API_KEY env var."
+    },
+    {
+      "name": "netayume-v4",
+      "url": "https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/resolve/main/NetaYume_v4_all_in_one.safetensors",
+      "dest": "checkpoints/NetaYume_v4_all_in_one.safetensors",
+      "size": 10620229821,
+      "auth": "huggingface",
+      "note": "Lumina-Image-2 architecture (NOT SDXL). All-in-one safetensors (Gemma-2 text encoder + Lumina transformer + Flux VAE bundled). Works with standard CheckpointLoaderSimple in ComfyUI v0.18.2+. Use sampler_name='euler' scheduler='normal' cfg=4.0 steps=25. The previous AnonymousFinalBoss/NetaYume-v4-all-in-one repo is deleted (404) -- this duongve/NetaYume-Lumina-Image-2.0 is the canonical one as of 2026-06."
+    },
+    {
+      "name": "wai-illustrious-sdxl-v170",
+      "url": "https://civitai.com/api/download/models/827184?token=${CIVITAI_API_KEY}",
+      "dest": "checkpoints/waiIllustriousSDXL_v170.safetensors",
+      "size": 6938040794,
+      "auth": "civitai",
+      "note": "WAI's Illustrious SDXL v1.7.0 (2024-Q4 release). The predecessor lineage to the current Illustrious family -- same SDXL base, but earlier fine-tune with softer skin tones and less aggressive hand/face correction than v3.5. Reuses the SDXL sampler config: dpmpp_2m/karras, cfg=7, steps=30, 1024x1024. 307-redirects to B2 with a 15-min signed URL."
     }
   ],
+
   "loras": [
     {
-      "name": "Sadamoto-Yoshiyuki-PONY-XL",
-      "url": "https://civitai.com/api/download/models/391692",
+      "name": "illustrious-style-sdxl",
+      "url": "https://civitai.com/api/download/models/391692?token=${CIVITAI_API_KEY}",
       "dest": "loras/Sadamoto_Yoshiyuki_XL_PONY.safetensors",
       "size": 359000000,
-      "auth": "civitai"
+      "auth": "civitai",
+      "note": "Optional Sadamoto Yoshiyuki XL LoRA. Only used by the Animagine template. Skip for the smoke test if volume is tight."
     }
   ],
+
   "vae": [],
   "text_encoders": [],
   "controlnet": []
