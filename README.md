@@ -4,7 +4,7 @@ A cloud-native, GPU-ready Docker image for running ComfyUI with anime diffusion 
 
 ## Features
 
-- **Base image**: matrix over `pytorch/pytorch` CUDA 12.1 / 12.4 / 12.8 / 13.0 tags. See [Base images & tags](#base-images--tags) below.
+- **Base image**: built on a `pytorch/pytorch` tag — see [Base images & tags](#base-images--tags) below.
 - **Pre-installed**: ComfyUI + ComfyUI-Manager + aria2 (fast resume downloads)
 - **Model bootstrap**: `models.json` manifest for idempotent, resumable downloads
 - **SSH ready**: Host keys generated at container start (secure, no baked keys)
@@ -12,16 +12,14 @@ A cloud-native, GPU-ready Docker image for running ComfyUI with anime diffusion 
 
 ## Base images & tags
 
-The `latest` tag is the broadest-compatible variant. Pin a specific tag if your
-host's NVIDIA driver can't run the latest. Each image carries OCI labels so
-consumers can `docker inspect` to find the right tag for their host.
+The image is built from one `pytorch/pytorch` base per run. Each image carries OCI labels so consumers can `docker inspect` to find the right tag for their host's driver.
 
 | Tag | PyTorch | CUDA | NVIDIA driver floor | Use when |
 |---|---|---|---|---|
-| `cuda12.1-pytorch2.5.1` | 2.5.1 | 12.1 | 12010 | Broadest compat — use on legacy RunPod/Vast.ai hosts |
-| `cuda12.4-pytorch2.6.0` | 2.6.0 | 12.4 | 12040 | Mid-range |
-| `cuda12.8-pytorch2.9.1` | 2.9.1 | 12.8 | 12080 | Newer stable |
 | `latest` (alias of `cuda13.0-pytorch2.12.0`) | 2.12.0 | 13.0 | 12080 | Most recent — default for new hosts with current NVIDIA drivers |
+| `cuda13.0-pytorch2.12.0` | 2.12.0 | 13.0 | 12080 | Pin to this tag explicitly |
+
+> **Older bases:** to publish a variant for an older driver, re-trigger the GitHub Actions workflow manually (Actions → Build and Push → Run workflow) and change the inputs. The image gets tagged `cuda<X>-pytorch<Y>` and (optionally) `:latest`.
 
 **Programmatic selection:**
 
@@ -30,10 +28,10 @@ consumers can `docker inspect` to find the right tag for their host.
 docker manifest inspect ghcr.io/pedro-tramontin/comfyui-anime-bootstrap | jq -r '.manifests[].digest'
 
 # Inspect a tag's driver floor
-docker pull ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda12.1-pytorch2.5.1
+docker pull ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 docker inspect --format '{{ index .Config.Labels "com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor" }}' \
-  ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda12.1-pytorch2.5.1
-# → 12010
+  ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+# → 12080
 ```
 
 **Quick Start**
@@ -102,6 +100,23 @@ pytest tests/integration_test.py -v --timeout=300
 ```
 
 In CI, tests execute against the freshly built `load: true` image **before** pushing to GHCR.
+
+## Building other variants
+
+The workflow defaults build the current "latest" variant (cuda13.0-pytorch2.12.0). To publish a different variant without changing the defaults:
+
+1. Go to **Actions** → **Build and Push** → **Run workflow**.
+2. Fill in the inputs:
+   - `pytorch_tag` — full `pytorch/pytorch` tag, e.g. `2.5.1-cuda12.1-cudnn9-runtime`
+   - `cuda` — CUDA version, e.g. `12.1`
+   - `pytorch` — PyTorch version, e.g. `2.5.1`
+   - `driver_floor` — minimum NVIDIA driver, e.g. `12010`
+   - `is_latest` — tick to also publish as `:latest` (default: ticked)
+3. Click **Run workflow**.
+
+The CI verifies the `pytorch/pytorch:<tag>` exists on Docker Hub before building, so a typo fails fast (seconds) instead of 30s into layer pull.
+
+**To make a new variant the permanent default** (e.g. a new PyTorch release), edit the `default:` values in both the `workflow_dispatch.inputs` block and the `Set defaults` step in `.github/workflows/build.yml`, and push.
 
 ## License
 

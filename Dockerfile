@@ -1,33 +1,28 @@
 # syntax=docker/dockerfile:1
 #
-# ComfyUI Anime Bootstrap — base-image matrix
-# -------------------------------------------
-# The image is built against one of several `pytorch/pytorch` tags depending on
-# the host's NVIDIA driver. The `latest` alias always points to the
-# broadest-compatible variant (cuda12.1-pytorch2.5.1, driver floor 12010).
+# ComfyUI Anime Bootstrap — base image
+# ------------------------------------
+# Single-variant image. The base pytorch/pytorch tag, CUDA version, PyTorch
+# version, and minimum NVIDIA driver are passed as build args. See
+# .github/workflows/build.yml for the current defaults and how to override
+# them on a manual workflow trigger.
 #
-# Tag scheme: cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>
-# Example:    ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda12.1-pytorch2.5.1
+# Image tag scheme: cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>
+# Example:         ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 #
-# Build with a specific base:
+# Build with custom values:
 #   docker build --build-arg PYTORCH_TAG=2.5.1-cuda12.1-cudnn9-runtime \
 #                --build-arg CUDA_VERSION=12.1 --build-arg PYTORCH_VERSION=2.5.1 \
 #                --build-arg DRIVER_FLOOR=12010 .
-#
-# Available variants (see .github/workflows/build.yml for the matrix):
-#   - cuda12.1-pytorch2.5.1  (broadest compat — driver 12010+)
-#   - cuda12.4-pytorch2.7.0  (mid-range — driver 12040+)
-#   - cuda12.8-pytorch2.6.0  (newer stable — driver 12080+)
-#   - cuda13.0-pytorch2.12.0 (bleeding edge — driver 12080+ for CUDA 13)
 
-ARG PYTORCH_TAG=2.5.1-cuda12.1-cudnn9-runtime
+ARG PYTORCH_TAG=2.12.0-cuda13.0-cudnn9-runtime
 FROM pytorch/pytorch:${PYTORCH_TAG}
 
 # Build args (must come after FROM to be visible in the rest of the Dockerfile)
 ARG PYTORCH_TAG
-ARG CUDA_VERSION=12.1
-ARG PYTORCH_VERSION=2.5.1
-ARG DRIVER_FLOOR=12010
+ARG CUDA_VERSION=13.0
+ARG PYTORCH_VERSION=2.12.0
+ARG DRIVER_FLOOR=12080
 
 # OCI / container labels — consumers can read these via `docker inspect` or
 # `crane manifest` to pick the right image for their host's driver.

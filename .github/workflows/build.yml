@@ -6,26 +6,63 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      pytorch_tag:
+        description: 'Full pytorch/pytorch tag (e.g. 2.12.0-cuda13.0-cudnn9-runtime)'
+        required: false
+        default: '2.12.0-cuda13.0-cudnn9-runtime'
+        type: string
+      cuda:
+        description: 'CUDA major.minor (e.g. 13.0). Used for the image tag.'
+        required: false
+        default: '13.0'
+        type: string
+      pytorch:
+        description: 'PyTorch version (e.g. 2.12.0). Used for the image tag.'
+        required: false
+        default: '2.12.0'
+        type: string
+      driver_floor:
+        description: 'Minimum NVIDIA driver the host needs (e.g. 12080).'
+        required: false
+        default: '12080'
+        type: string
+      is_latest:
+        description: 'Also publish this image as :latest'
+        required: false
+        type: boolean
+        default: true
+
+# Base-image build for one variant.
+#
+# The defaults below (and the workflow_dispatch input defaults above) define
+# the "current" variant — what `latest` should point to on push/PR and what
+# the manual trigger form is pre-filled with.
+#
+# Image tag scheme: cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>
+# Example:         ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+#
+# To publish a different variant:
+#   - Trigger Actions -> Build and Push -> Run workflow, change the inputs.
+#   - Or push a PR that updates the defaults in the `Set defaults` step.
+#
+# To add support for a new NVIDIA driver, update the defaults in BOTH the
+# workflow_dispatch inputs (the form pre-fill) AND the `Set defaults` step
+# (the actual values used on push/PR).
+
+defaults:
+  run:
+    shell: bash
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   TEST_TAG: comfyui-anime-bootstrap:test
 
-# Base-image matrix.
-#
-# The `latest` alias always points to the broadest-compatible variant
-# (cuda12.1-pytorch2.5.1, driver 12010+) so a default `docker pull` on a
-# legacy Vast.ai host or an older RunPod machine Just Works.
-#
-# Each entry also gets its own tag `cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>`
-# so consumers can pin to a specific combo. Driver floor is the MINIMUM NVIDIA
-# driver version the host needs — below this, PyTorch's CUDA init will fail.
-#
-# To add a new base: append a row, the workflow picks it up automatically.
 jobs:
-  base-matrix:
-    name: ${{ matrix.label }}
+  build:
+    name: cuda${{ steps.cfg.outputs.cuda }}-pytorch${{ steps.cfg.outputs.pytorch }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,53 +70,67 @@ jobs:
       attestations: write
       id-token: write
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Broadest compat — CUDA 12.1, oldest NVIDIA driver (~525+)
-          - pytorch_tag: 2.5.1-cuda12.1-cudnn9-runtime
-            cuda: "12.1"
-            pytorch: "2.5.1"
-            driver_floor: "12010"
-            label: "cuda12.1-pytorch2.5.1 (broadest compat)"
-            is_latest: false
-          # Mid-range — CUDA 12.4, ~driver 12040+
-          - pytorch_tag: 2.6.0-cuda12.4-cudnn9-runtime
-            cuda: "12.4"
-            pytorch: "2.6.0"
-            driver_floor: "12040"
-            label: "cuda12.4-pytorch2.6.0"
-            is_latest: false
-          # Newer stable — CUDA 12.8, driver 12080+
-          - pytorch_tag: 2.9.1-cuda12.8-cudnn9-runtime
-            cuda: "12.8"
-            pytorch: "2.9.1"
-            driver_floor: "12080"
-            label: "cuda12.8-pytorch2.9.1"
-            is_latest: false
-          # Bleeding edge — CUDA 13.0, driver 12080+, default for `latest`
-          - pytorch_tag: 2.12.0-cuda13.0-cudnn9-runtime
-            cuda: "13.0"
-            pytorch: "2.12.0"
-            driver_floor: "12080"
-            label: "cuda13.0-pytorch2.12.0 (latest bleeding edge)"
-            is_latest: true
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Verify base image exists on Docker Hub
-        # Fail fast if the pytorch/pytorch:<tag> we picked doesn't exist on
-        # the Hub. Without this, the build step fails 30s into layer pull
-        # instead of at the top of the job where it's easy to fix.
+      - name: Set defaults
+        id: cfg
+        env:
+          in_pytorch_tag: ${{ inputs.pytorch_tag || '' }}
+          in_cuda: ${{ inputs.cuda || '' }}
+          in_pytorch: ${{ inputs.pytorch || '' }}
+          in_driver_floor: ${{ inputs.driver_floor || '' }}
+          in_is_latest: ${{ inputs.is_latest }}
         run: |
-          echo "Verifying docker.io/pytorch/pytorch:${{ matrix.pytorch_tag }} exists..."
+          set -euo pipefail
+          # workflow_dispatch inputs override the YAML defaults; if the
+          # input is blank (e.g. on push/PR), fall back to the defaults
+          # baked into the workflow.
+          PYTORCH_TAG="${in_pytorch_tag:-2.12.0-cuda13.0-cudnn9-runtime}"
+          CUDA="${in_cuda:-13.0}"
+          PYTORCH="${in_pytorch:-2.12.0}"
+          DRIVER_FLOOR="${in_driver_floor:-12080}"
+          IS_LATEST="${in_is_latest:-true}"
+
+          # Compute the final image tag(s)
+          VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
+          if [ "${IS_LATEST}" = "true" ]; then
+            TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG},${REGISTRY}/${IMAGE_NAME}:latest"
+          else
+            TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG}"
+          fi
+
+          # Export for downstream steps
+          cat >> "$GITHUB_OUTPUT" <<EOF
+          pytorch_tag=${PYTORCH_TAG}
+          cuda=${CUDA}
+          pytorch=${PYTORCH}
+          driver_floor=${DRIVER_FLOOR}
+          is_latest=${IS_LATEST}
+          variant_tag=${VARIANT_TAG}
+          tags=${TAGS}
+          EOF
+
+          echo "--- build configuration ---"
+          echo "pytorch_tag:  ${PYTORCH_TAG}"
+          echo "cuda:         ${CUDA}"
+          echo "pytorch:      ${PYTORCH}"
+          echo "driver_floor: ${DRIVER_FLOOR}"
+          echo "is_latest:    ${IS_LATEST}"
+          echo "image tags:   ${TAGS}"
+          echo "----------------------------"
+
+      - name: Verify base image exists on Docker Hub
+        # Fail fast if the pytorch/pytorch:<tag> we picked doesn't exist.
+        # Without this, the build step fails 30s into layer pull instead of
+        # at the top of the job where it's easy to fix.
+        run: |
+          echo "Verifying docker.io/pytorch/pytorch:${{ steps.cfg.outputs.pytorch_tag }} exists..."
           http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://hub.docker.com/v2/repositories/pytorch/pytorch/tags/${{ matrix.pytorch_tag }}/")
+            "https://hub.docker.com/v2/repositories/pytorch/pytorch/tags/${{ steps.cfg.outputs.pytorch_tag }}/")
           if [ "$http_code" != "200" ]; then
-            echo "::error::pytorch/pytorch:${{ matrix.pytorch_tag }} not found on Docker Hub (HTTP $http_code)"
+            echo "::error::pytorch/pytorch:${{ steps.cfg.outputs.pytorch_tag }} not found on Docker Hub (HTTP $http_code)"
             echo "::error::Available tags: https://hub.docker.com/r/pytorch/pytorch/tags?name=cudnn9-runtime"
             exit 1
           fi
@@ -96,32 +147,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      # Per-variant tag and (optionally) latest
-      - name: Compute tag for this variant
-        id: tags
-        run: |
-          VARIANT_TAG="cuda${{ matrix.cuda }}-pytorch${{ matrix.pytorch }}"
-          if [ "${{ matrix.is_latest }}" = "true" ]; then
-            TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VARIANT_TAG},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          else
-            TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VARIANT_TAG}"
-          fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-          echo "Computed tags: ${TAGS}"
-
       - name: Build test image (do not push yet)
         run: |
           docker build \
-            --build-arg PYTORCH_TAG="${{ matrix.pytorch_tag }}" \
-            --build-arg CUDA_VERSION="${{ matrix.cuda }}" \
-            --build-arg PYTORCH_VERSION="${{ matrix.pytorch }}" \
-            --build-arg DRIVER_FLOOR="${{ matrix.driver_floor }}" \
-            -t "${{ env.TEST_TAG }}" \
+            --build-arg PYTORCH_TAG="${{ steps.cfg.outputs.pytorch_tag }}" \
+            --build-arg CUDA_VERSION="${{ steps.cfg.outputs.cuda }}" \
+            --build-arg PYTORCH_VERSION="${{ steps.cfg.outputs.pytorch }}" \
+            --build-arg DRIVER_FLOOR="${{ steps.cfg.outputs.driver_floor }}" \
+            -t "${TEST_TAG}" \
             .
-          docker inspect "${{ env.TEST_TAG }}" > /dev/null && echo "Image verified in local daemon"
+          docker inspect "${TEST_TAG}" > /dev/null && echo "Image verified in local daemon"
 
       - name: Run integration tests
-        run: pytest tests/integration_test.py -v --image-tag=${{ env.TEST_TAG }}
+        run: pytest tests/integration_test.py -v --image-tag=${TEST_TAG}
         timeout-minutes: 10
 
       # Free disk space: drop the 6GB test image + prune buildx cache before
@@ -131,7 +169,7 @@ jobs:
       - name: Free disk space before push
         if: github.event_name != 'pull_request'
         run: |
-          docker rmi -f "${{ env.TEST_TAG }}" 2>/dev/null || true
+          docker rmi -f "${TEST_TAG}" 2>/dev/null || true
           docker builder prune -af --filter "until=1h" 2>/dev/null || true
           df -h /tmp /var/lib/docker 2>/dev/null | tail -5
           echo "Disk cleanup done"
@@ -140,7 +178,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${REGISTRY}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -152,12 +190,12 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ steps.cfg.outputs.tags }}
           build-args: |
-            PYTORCH_TAG=${{ matrix.pytorch_tag }}
-            CUDA_VERSION=${{ matrix.cuda }}
-            PYTORCH_VERSION=${{ matrix.pytorch }}
-            DRIVER_FLOOR=${{ matrix.driver_floor }}
+            PYTORCH_TAG=${{ steps.cfg.outputs.pytorch_tag }}
+            CUDA_VERSION=${{ steps.cfg.outputs.cuda }}
+            PYTORCH_VERSION=${{ steps.cfg.outputs.pytorch }}
+            DRIVER_FLOOR=${{ steps.cfg.outputs.driver_floor }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -166,6 +204,6 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v4
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-name: ${REGISTRY}/${IMAGE_NAME}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
