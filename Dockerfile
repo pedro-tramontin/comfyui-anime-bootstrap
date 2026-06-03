@@ -60,8 +60,17 @@ RUN apt-get update && apt-get install -y \
     rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# ComfyUI installation to /workspace/ComfyUI
-ENV COMFYUI_DIR=/workspace/ComfyUI
+# ComfyUI installation to /opt/ComfyUI.
+#
+# Why /opt and not /workspace/ComfyUI? On RunPod a network volume can be
+# mounted at /workspace -- when it is, the mount SHADOWS everything baked
+# into the image at /workspace, including the cloned ComfyUI source. The
+# start.sh script then bails with "FATAL: /workspace/ComfyUI/main.py
+# not found" and the container crash-loops. Moving the ComfyUI source
+# to /opt/ComfyUI (outside the volume mount point) makes the image
+# volume-mount-friendly; models are still downloaded to /workspace/models
+# (which is the volume, when one is attached, and a tmpfs otherwise).
+ENV COMFYUI_DIR=/opt/ComfyUI
 RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI "$COMFYUI_DIR" \
     && pip install --break-system-packages --no-cache-dir -r "$COMFYUI_DIR/requirements.txt"
 
@@ -69,7 +78,9 @@ RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI "$COMFYUI_DIR"
 RUN git clone --depth 1 https://github.com/ltdrdata/ComfyUI-Manager \
     "$COMFYUI_DIR/custom_nodes/ComfyUI-Manager"
 
-# Workspace symlinks for mounts
+# Workspace model/output/input dirs. /workspace is the RunPod volume
+# mount path; when no volume is attached, this just lives on the
+# container disk.
 RUN mkdir -p /workspace/models /workspace/output /workspace/input
 
 # Bootstrap script
@@ -79,10 +90,10 @@ RUN chmod +x /usr/local/bin/bootstrap.sh
 COPY models-template.json /usr/local/share/models-template.json
 
 # ComfyUI extra_model_paths.yaml — tells ComfyUI to scan /workspace/models/ in
-# addition to its default /workspace/ComfyUI/models/. Without this, the
-# bootstrap's downloads silently land in a path ComfyUI never reads.
-# See SKILL.md §6.x and references/comfyui-startup-pitfalls.md for the
-# "no models visible despite successful downloads" symptom this fixes.
+# addition to its default /opt/ComfyUI/models/. Without this, the bootstrap's
+# downloads silently land in a path ComfyUI never reads. See SKILL.md §6.x
+# and references/comfyui-startup-pitfalls.md for the "no models visible
+# despite successful downloads" symptom this fixes.
 COPY extra_model_paths.yaml $COMFYUI_DIR/extra_model_paths.yaml
 
 # Entry script

@@ -16,7 +16,9 @@ shopt -s nullglob
 
 echo "=== ComfyUI Anime Bootstrap ==="
 
-COMFYUI_DIR="${COMFYUI_DIR:-/workspace/ComfyUI}"
+# ComfyUI source dir is at /opt/ComfyUI (not /workspace/ComfyUI -- see
+# the comment in the Dockerfile for the volume-shadowing rationale).
+COMFYUI_DIR="${COMFYUI_DIR:-/opt/ComfyUI}"
 MODELS_ROOT="${MODELS_ROOT:-/workspace/models}"
 MANIFEST="${MODELS_MANIFEST:-/workspace/models.json}"
 

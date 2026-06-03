@@ -220,12 +220,18 @@ def test_comfyui_api_responds(container, comfy_host_port):
 
 
 def test_workspace_directories_exist(docker_client, image_tag):
-    """The /workspace mount structure was created in Dockerfile."""
+    """The /workspace mount structure was created in Dockerfile.
+
+    Note: ComfyUI source is at /opt/ComfyUI (NOT /workspace/ComfyUI),
+    to avoid being shadowed when a RunPod network volume is mounted
+    at /workspace. /workspace still holds the models/output/input dirs
+    that the bootstrap and ComfyUI use.
+    """
     try:
         output = docker_client.containers.run(
             image_tag,
             entrypoint=["/bin/sh", "-c"],
-            command=["ls -d /workspace/ComfyUI /workspace/models /workspace/output /workspace/input"],
+            command=["ls -d /opt/ComfyUI /workspace/models /workspace/output /workspace/input"],
             remove=True,
             detach=False,
         )
