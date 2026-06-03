@@ -107,16 +107,15 @@ The workflow defaults build the current "latest" variant (cuda13.0-pytorch2.12.0
 
 1. Go to **Actions** → **Build and Push** → **Run workflow**.
 2. Fill in the inputs:
-   - `pytorch_tag` — full `pytorch/pytorch` tag, e.g. `2.5.1-cuda12.1-cudnn9-runtime`
    - `cuda` — CUDA version, e.g. `12.1`
    - `pytorch` — PyTorch version, e.g. `2.5.1`
    - `driver_floor` — minimum NVIDIA driver, e.g. `12010`
-   - `is_latest` — tick to also publish as `:latest` (default: ticked)
+   - `is_latest` — tick to ALSO publish as `:latest` (default: ticked). The variant tag is always applied regardless of this flag.
 3. Click **Run workflow**.
 
-The CI verifies the `pytorch/pytorch:<tag>` exists on Docker Hub before building, so a typo fails fast (seconds) instead of 30s into layer pull.
+The workflow derives the `pytorch/pytorch:<X>-cuda<Y>-cudnn9-runtime` base tag from `cuda` + `pytorch` and verifies it exists on Docker Hub before building, so a typo fails fast (seconds) instead of 30s into layer pull.
 
-**To make a new variant the permanent default** (e.g. a new PyTorch release), edit the `default:` values in both the `workflow_dispatch.inputs` block and the `Set defaults` step in `.github/workflows/build.yml`, and push.
+**To make a new variant the permanent default** (e.g. a new PyTorch release), edit the `default:` values in BOTH the `workflow_dispatch.inputs` block AND the `Set defaults` step in `.github/workflows/build.yml`, and push.
 
 ## License
 

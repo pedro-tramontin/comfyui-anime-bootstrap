@@ -2,26 +2,32 @@
 #
 # ComfyUI Anime Bootstrap — base image
 # ------------------------------------
-# Single-variant image. The base pytorch/pytorch tag, CUDA version, PyTorch
-# version, and minimum NVIDIA driver are passed as build args. See
-# .github/workflows/build.yml for the current defaults and how to override
-# them on a manual workflow trigger.
+# Single-variant image. The base pytorch/pytorch tag, PyTorch version, CUDA
+# version, and minimum NVIDIA driver are passed as build args. The
+# pytorch/pytorch tag itself is DERIVED from PYROCH_VERSION + CUDA_VERSION
+# as `<pytorch>-cuda<cuda>-cudnn9-runtime` — we don't take it as a separate
+# arg. See .github/workflows/build.yml for the current defaults and how to
+# override them on a manual workflow trigger.
 #
 # Image tag scheme: cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>
 # Example:         ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 #
 # Build with custom values:
-#   docker build --build-arg PYTORCH_TAG=2.5.1-cuda12.1-cudnn9-runtime \
-#                --build-arg CUDA_VERSION=12.1 --build-arg PYTORCH_VERSION=2.5.1 \
+#   docker build --build-arg CUDA_VERSION=12.1 \
+#                --build-arg PYTORCH_VERSION=2.5.1 \
 #                --build-arg DRIVER_FLOOR=12010 .
 
-ARG PYTORCH_TAG=2.12.0-cuda13.0-cudnn9-runtime
+# Derive the base image tag from CUDA + PyTorch versions, then FROM it.
+ARG PYTORCH_TAG=${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn9-runtime
 FROM pytorch/pytorch:${PYTORCH_TAG}
 
-# Build args (must come after FROM to be visible in the rest of the Dockerfile)
-ARG PYTORCH_TAG
+# Build args (must come after FROM to be visible in the rest of the Dockerfile).
+# Defaults match the current "latest" variant in .github/workflows/build.yml.
 ARG CUDA_VERSION=13.0
 ARG PYTORCH_VERSION=2.12.0
+# DRIVER_FLOOR is consumed only by the OCI label below — integration tests
+# read it via `docker inspect` to decide whether to skip CUDA-touching tests
+# on hosts whose NVIDIA driver is too old for the base pytorch/cuda combo.
 ARG DRIVER_FLOOR=12080
 
 # OCI / container labels — consumers can read these via `docker inspect` or
@@ -31,11 +37,7 @@ LABEL org.opencontainers.image.description="Cloud-native ComfyUI base for anime 
 LABEL org.opencontainers.image.source="https://github.com/pedro-tramontin/comfyui-anime-bootstrap"
 LABEL org.opencontainers.image.cuda.version="${CUDA_VERSION}"
 LABEL org.opencontainers.image.pytorch.version="${PYTORCH_VERSION}"
-LABEL com.pedro-tramontin.comfyui-anime-bootstrap.pytorch-tag="${PYTORCH_TAG}"
 LABEL com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor="${DRIVER_FLOOR}"
-
-# Renaming the arg so it shows up correctly in `docker history`
-LABEL pytorch.tag="${PYTORCH_TAG}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1

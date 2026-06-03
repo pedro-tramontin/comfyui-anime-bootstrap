@@ -8,28 +8,26 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      pytorch_tag:
-        description: 'Full pytorch/pytorch tag (e.g. 2.12.0-cuda13.0-cudnn9-runtime)'
-        required: false
-        default: '2.12.0-cuda13.0-cudnn9-runtime'
-        type: string
+      # All four inputs below are optional — leaving them blank uses the
+      # defaults baked into the `Set defaults` step. To publish a different
+      # variant, change the values in the workflow trigger form.
       cuda:
-        description: 'CUDA major.minor (e.g. 13.0). Used for the image tag.'
+        description: 'CUDA major.minor (e.g. 13.0). Used for the image tag and the pytorch/pytorch base.'
         required: false
         default: '13.0'
         type: string
       pytorch:
-        description: 'PyTorch version (e.g. 2.12.0). Used for the image tag.'
+        description: 'PyTorch version (e.g. 2.12.0). Used for the image tag and the pytorch/pytorch base.'
         required: false
         default: '2.12.0'
         type: string
       driver_floor:
-        description: 'Minimum NVIDIA driver the host needs (e.g. 12080).'
+        description: 'Minimum NVIDIA driver the host needs (e.g. 12080). Baked into the image as an OCI label so the integration test can skip CUDA-touching tests on older hosts.'
         required: false
         default: '12080'
         type: string
       is_latest:
-        description: 'Also publish this image as :latest'
+        description: 'If true, ALSO tag this image as :latest. The variant tag (cuda<X>-pytorch<Y>) is always applied regardless of this flag.'
         required: false
         type: boolean
         default: true
@@ -43,13 +41,15 @@ on:
 # Image tag scheme: cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>
 # Example:         ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 #
+# The pytorch/pytorch base image tag is derived as
+# `<pytorch>-cuda<cuda>-cudnn9-runtime` (e.g. `2.12.0-cuda13.0-cudnn9-runtime`).
+# We pin the cudnn9 variant explicitly; non-cudnn9 or rc tags would need a
+# different schema and aren't currently supported here.
+#
 # To publish a different variant:
 #   - Trigger Actions -> Build and Push -> Run workflow, change the inputs.
-#   - Or push a PR that updates the defaults in the `Set defaults` step.
-#
-# To add support for a new NVIDIA driver, update the defaults in BOTH the
-# workflow_dispatch inputs (the form pre-fill) AND the `Set defaults` step
-# (the actual values used on push/PR).
+#   - Or push a PR that updates the defaults in the workflow_dispatch inputs
+#     AND the `Set defaults` step.
 
 defaults:
   run:
@@ -62,9 +62,6 @@ env:
 
 jobs:
   build:
-    # Job name is set in the first step (Set defaults) to include the
-    # resolved pytorch/cuda version. We can't use step outputs here at
-    # the job level (they don't exist at parse time).
     name: build-image
     runs-on: ubuntu-latest
     permissions:
@@ -81,35 +78,32 @@ jobs:
         id: cfg
         env:
           # On workflow_dispatch, inputs.X holds whatever the user typed.
-          # On push/PR, inputs is empty/null and the shell defaults below kick in.
-          in_pytorch_tag: ${{ inputs.pytorch_tag }}
+          # On push/PR, inputs is empty/null and the shell defaults below
+          # kick in via ${var:-default}.
           in_cuda: ${{ inputs.cuda }}
           in_pytorch: ${{ inputs.pytorch }}
           in_driver_floor: ${{ inputs.driver_floor }}
           in_is_latest: ${{ inputs.is_latest }}
         run: |
           set -euo pipefail
-          # The shell default syntax handles BOTH cases (input blank or input
-          # not provided at all). On push/PR, $in_pytorch_tag is empty, so
-          # the default kicks in.
-          PYTORCH_TAG="${in_pytorch_tag:-2.12.0-cuda13.0-cudnn9-runtime}"
           CUDA="${in_cuda:-13.0}"
           PYTORCH="${in_pytorch:-2.12.0}"
           DRIVER_FLOOR="${in_driver_floor:-12080}"
           IS_LATEST="${in_is_latest:-true}"
 
-          # Compute the final image tag(s)
+          # Derived: full pytorch/pytorch tag we pull as the base image.
+          PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
+
+          # The image tag we publish under (always set; is_latest adds :latest on top).
           VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
+          TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG}"
           if [ "${IS_LATEST}" = "true" ]; then
-            TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG},${REGISTRY}/${IMAGE_NAME}:latest"
-          else
-            TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG}"
+            TAGS="${TAGS},${REGISTRY}/${IMAGE_NAME}:latest"
           fi
 
           # Export for downstream steps. printf avoids heredoc indentation
-          # quirks: GITHUB_OUTPUT needs each key=value at the start of its
-          # line, and heredocs inside YAML block scalars don't reliably
-          # strip the YAML's own indentation.
+          # quirks inside YAML block scalars — GITHUB_OUTPUT needs each
+          # key=value at the start of its line.
           {
             printf 'pytorch_tag=%s\n'  "${PYTORCH_TAG}"
             printf 'cuda=%s\n'         "${CUDA}"
@@ -130,9 +124,9 @@ jobs:
           echo "----------------------------"
 
       - name: Verify base image exists on Docker Hub
-        # Fail fast if the pytorch/pytorch:<tag> we picked doesn't exist.
-        # Without this, the build step fails 30s into layer pull instead of
-        # at the top of the job where it's easy to fix.
+        # Fail fast if the derived pytorch/pytorch:<tag> doesn't exist on the
+        # Hub. Without this, the build step fails 30s into layer pull instead
+        # of at the top of the job where it's easy to fix.
         run: |
           echo "Verifying docker.io/pytorch/pytorch:${{ steps.cfg.outputs.pytorch_tag }} exists..."
           http_code=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -158,7 +152,6 @@ jobs:
       - name: Build test image (do not push yet)
         run: |
           docker build \
-            --build-arg PYTORCH_TAG="${{ steps.cfg.outputs.pytorch_tag }}" \
             --build-arg CUDA_VERSION="${{ steps.cfg.outputs.cuda }}" \
             --build-arg PYTORCH_VERSION="${{ steps.cfg.outputs.pytorch }}" \
             --build-arg DRIVER_FLOOR="${{ steps.cfg.outputs.driver_floor }}" \
@@ -169,18 +162,6 @@ jobs:
       - name: Run integration tests
         run: pytest tests/integration_test.py -v --image-tag=${TEST_TAG}
         timeout-minutes: 10
-
-      # Free disk space: drop the 6GB test image + prune buildx cache before
-      # the push step builds the image again. GitHub runners have ~14GB
-      # ephemeral; a PyTorch base + build layer + test image can blow past
-      # that without explicit cleanup.
-      - name: Free disk space before push
-        if: github.event_name != 'pull_request'
-        run: |
-          docker rmi -f "${TEST_TAG}" 2>/dev/null || true
-          docker builder prune -af --filter "until=1h" 2>/dev/null || true
-          df -h /tmp /var/lib/docker 2>/dev/null | tail -5
-          echo "Disk cleanup done"
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -200,7 +181,6 @@ jobs:
           push: true
           tags: ${{ steps.cfg.outputs.tags }}
           build-args: |
-            PYTORCH_TAG=${{ steps.cfg.outputs.pytorch_tag }}
             CUDA_VERSION=${{ steps.cfg.outputs.cuda }}
             PYTORCH_VERSION=${{ steps.cfg.outputs.pytorch }}
             DRIVER_FLOOR=${{ steps.cfg.outputs.driver_floor }}
