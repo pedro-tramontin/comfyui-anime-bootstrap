@@ -47,7 +47,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
-# Runtime deps: git, wget, curl, openssh, aria2 (faster resume downloads)
+# Runtime deps: git, wget, curl, openssh, aria2 (faster resume downloads),
+# ffmpeg (gallery video thumbnails).
 # NOTE: pytorch base image already has pip (conda). Do NOT install python3-pip from apt.
 RUN apt-get update && apt-get install -y \
     git \
@@ -58,6 +59,7 @@ RUN apt-get update && apt-get install -y \
     aria2 \
     jq \
     rsync \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ComfyUI installation to /opt/ComfyUI.
@@ -77,6 +79,12 @@ RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI "$COMFYUI_DIR"
 # ComfyUI-Manager
 RUN git clone --depth 1 https://github.com/ltdrdata/ComfyUI-Manager \
     "$COMFYUI_DIR/custom_nodes/ComfyUI-Manager"
+
+# ComfyUI_GalleryManager (bundled in this image — no first-boot install needed).
+# Provides /gallery (with /gallery → /gallery/ redirect) and the JSON metadata API.
+# Pillow is required by the PNG-metadata extraction path.
+COPY custom_nodes/ComfyUI_GalleryManager "$COMFYUI_DIR/custom_nodes/ComfyUI_GalleryManager"
+RUN pip install --break-system-packages --no-cache-dir Pillow
 
 # Workspace model/output/input dirs. /workspace is the RunPod volume
 # mount path; when no volume is attached, this just lives on the
