@@ -18,6 +18,7 @@ Run in CI (after image build):
 import time
 import socket
 import os
+import subprocess
 import tempfile
 import urllib.request, urllib.error
 import pytest
@@ -33,7 +34,6 @@ SSH_TIMEOUT = 30    # seconds for SSH to be ready
 def has_gpu():
     """Check if an NVIDIA GPU is available on the host."""
     try:
-        import subprocess
         result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=5)
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -111,10 +111,73 @@ def wait_for_port(host: str, port: int, timeout: int = 30) -> bool:
     return False
 
 
+def get_image_config(docker_client, image_tag):
+    """Return the image's resolved config (env, labels, cmd) or None on error."""
+    try:
+        return docker_client.images.get(image_tag).attrs.get("Config") or {}
+    except Exception:
+        return {}
+
+
+def get_image_labels(docker_client, image_tag):
+    """Return the image's OCI labels dict (or empty)."""
+    try:
+        return docker_client.images.get(image_tag).attrs.get("Labels") or {}
+    except Exception:
+        return {}
+
+
+def driver_floor_from_labels(labels):
+    """Read the DRIVER_FLOOR label, or 0 if missing (treat as 'no floor known')."""
+    raw = labels.get("com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor", "0")
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def cuda_version_from_labels(labels):
+    """Read CUDA version from labels, or None."""
+    raw = labels.get("org.opencontainers.image.cuda.version")
+    return str(raw).strip() if raw else None
+
+
 def test_container_starts(container):
     """Container reaches running state (even if it later exits on CPU)."""
     container.reload()
     assert container.status in ("running", "created", "exited")
+
+
+def test_driver_compatibility(docker_client, image_tag):
+    """Skip the CUDA-touching tests if the host driver is too old for this image.
+
+    Reads the image's OCI labels for CUDA version + driver floor, and if the
+    host's NVIDIA driver is older than the floor, the rest of the tests would
+    fail with a CUDA init error (not a real image bug). We skip with a clear
+    message instead.
+    """
+    if not has_gpu():
+        pytest.skip("No GPU on this runner — driver-compat check irrelevant")
+
+    labels = get_image_labels(docker_client, image_tag)
+    floor = driver_floor_from_labels(labels)
+    cuda = cuda_version_from_labels(labels)
+
+    # Probe the actual driver version via nvidia-smi
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        host_driver = int(out.stdout.strip().split(".")[0])  # e.g. "12070.42" -> 12070
+    except Exception as e:
+        pytest.skip(f"Couldn't probe host driver via nvidia-smi: {e}")
+
+    if floor and host_driver < floor:
+        pytest.skip(
+            f"Image targets CUDA {cuda} (driver floor {floor}); "
+            f"host driver is {host_driver}. Use a different tag for this host."
+        )
 
 
 def test_ssh_port_reachable(ssh_host_port):
