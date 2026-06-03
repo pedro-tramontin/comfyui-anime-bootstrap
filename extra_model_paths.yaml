@@ -1,12 +1,14 @@
 # ComfyUI extra model paths config
 # Tells ComfyUI to scan /workspace/models/ in addition to its default
-# /workspace/ComfyUI/models/. Required so the bootstrap's downloads to
+# /opt/ComfyUI/models/ (ComfyUI source is at /opt/ComfyUI, NOT
+# /workspace/ComfyUI -- see Dockerfile for the volume-shadowing
+# rationale). Required so the bootstrap's downloads to
 # /workspace/models/checkpoints/ are visible to the CheckpointLoaderSimple
 # node. Without this, downloads silently land in a path ComfyUI never
-# reads — the symptom is "no models visible" in the API despite successful
-# downloads in bootstrap.sh.
+# reads -- the symptom is "no models visible" in the API despite
+# successful downloads in bootstrap.sh.
 #
-# This file lives at /workspace/ComfyUI/extra_model_paths.yaml (set as
+# This file lives at /opt/ComfyUI/extra_model_paths.yaml (set as
 # the ComfyUI base path's relative file).
 #
 # See: https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example

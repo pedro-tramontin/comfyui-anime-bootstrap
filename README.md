@@ -5,9 +5,10 @@ A cloud-native, GPU-ready Docker image for running ComfyUI with anime diffusion 
 ## Features
 
 - **Base image**: built on a `pytorch/pytorch` tag — see [Base images & tags](#base-images--tags) below.
-- **Pre-installed**: ComfyUI + ComfyUI-Manager + aria2 (fast resume downloads)
+- **Pre-installed**: ComfyUI (in `/opt/ComfyUI`, volume-mount friendly) + ComfyUI-Manager + aria2 (fast resume downloads)
 - **Model bootstrap**: `models.json` manifest for idempotent, resumable downloads
 - **SSH ready**: Host keys generated at container start (secure, no baked keys)
+- **Volume-mount safe**: ComfyUI source lives outside `/workspace`, so attaching a RunPod network volume doesn't shadow the installation
 - **Multi-provider**: Tested on RunPod and Vast.ai
 
 ## Base images & tags
