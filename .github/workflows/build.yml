@@ -62,7 +62,10 @@ env:
 
 jobs:
   build:
-    name: cuda${{ steps.cfg.outputs.cuda }}-pytorch${{ steps.cfg.outputs.pytorch }}
+    # Job name is set in the first step (Set defaults) to include the
+    # resolved pytorch/cuda version. We can't use step outputs here at
+    # the job level (they don't exist at parse time).
+    name: build-image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,16 +80,18 @@ jobs:
       - name: Set defaults
         id: cfg
         env:
-          in_pytorch_tag: ${{ inputs.pytorch_tag || '' }}
-          in_cuda: ${{ inputs.cuda || '' }}
-          in_pytorch: ${{ inputs.pytorch || '' }}
-          in_driver_floor: ${{ inputs.driver_floor || '' }}
+          # On workflow_dispatch, inputs.X holds whatever the user typed.
+          # On push/PR, inputs is empty/null and the shell defaults below kick in.
+          in_pytorch_tag: ${{ inputs.pytorch_tag }}
+          in_cuda: ${{ inputs.cuda }}
+          in_pytorch: ${{ inputs.pytorch }}
+          in_driver_floor: ${{ inputs.driver_floor }}
           in_is_latest: ${{ inputs.is_latest }}
         run: |
           set -euo pipefail
-          # workflow_dispatch inputs override the YAML defaults; if the
-          # input is blank (e.g. on push/PR), fall back to the defaults
-          # baked into the workflow.
+          # The shell default syntax handles BOTH cases (input blank or input
+          # not provided at all). On push/PR, $in_pytorch_tag is empty, so
+          # the default kicks in.
           PYTORCH_TAG="${in_pytorch_tag:-2.12.0-cuda13.0-cudnn9-runtime}"
           CUDA="${in_cuda:-13.0}"
           PYTORCH="${in_pytorch:-2.12.0}"
@@ -101,16 +106,19 @@ jobs:
             TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG}"
           fi
 
-          # Export for downstream steps
-          cat >> "$GITHUB_OUTPUT" <<EOF
-          pytorch_tag=${PYTORCH_TAG}
-          cuda=${CUDA}
-          pytorch=${PYTORCH}
-          driver_floor=${DRIVER_FLOOR}
-          is_latest=${IS_LATEST}
-          variant_tag=${VARIANT_TAG}
-          tags=${TAGS}
-          EOF
+          # Export for downstream steps. printf avoids heredoc indentation
+          # quirks: GITHUB_OUTPUT needs each key=value at the start of its
+          # line, and heredocs inside YAML block scalars don't reliably
+          # strip the YAML's own indentation.
+          {
+            printf 'pytorch_tag=%s\n'  "${PYTORCH_TAG}"
+            printf 'cuda=%s\n'         "${CUDA}"
+            printf 'pytorch=%s\n'      "${PYTORCH}"
+            printf 'driver_floor=%s\n' "${DRIVER_FLOOR}"
+            printf 'is_latest=%s\n'    "${IS_LATEST}"
+            printf 'variant_tag=%s\n'  "${VARIANT_TAG}"
+            printf 'tags=%s\n'         "${TAGS}"
+          } >> "$GITHUB_OUTPUT"
 
           echo "--- build configuration ---"
           echo "pytorch_tag:  ${PYTORCH_TAG}"
@@ -178,7 +186,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
-          registry: ${REGISTRY}
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -204,6 +212,6 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v4
         with:
-          subject-name: ${REGISTRY}/${IMAGE_NAME}
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
