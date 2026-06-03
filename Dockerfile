@@ -17,9 +17,13 @@
 #                --build-arg PYTORCH_VERSION=2.5.1 \
 #                --build-arg DRIVER_FLOOR=12010 .
 
-# Derive the base image tag from CUDA + PyTorch versions, then FROM it.
-ARG PYTORCH_TAG=${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn9-runtime
-FROM pytorch/pytorch:${PYTORCH_TAG}
+# Derive the base image tag from CUDA + PyTorch versions. We declare the
+# pre-FROM ARGs (PYTORCH_VERSION, CUDA_VERSION) here so we can reference
+# their defaults in the FROM line — and then re-declare them with the
+# same defaults post-FROM for the rest of the Dockerfile.
+ARG PYTORCH_VERSION=2.12.0
+ARG CUDA_VERSION=13.0
+FROM pytorch/pytorch:${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn9-runtime
 
 # Build args (must come after FROM to be visible in the rest of the Dockerfile).
 # Defaults match the current "latest" variant in .github/workflows/build.yml.
