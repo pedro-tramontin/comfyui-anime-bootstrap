@@ -34,23 +34,37 @@ docker inspect --format '{{ index .Config.Labels "com.pedro-tramontin.comfyui-an
 # → 12080
 ```
 
-**Quick Start**
+## Model manifest
 
-### 1. Create a `models.json` manifest
+The image ships a **minimal fallback** `models-template.json` baked in (currently just the Animagine XL v4.0 checkpoint + the Sadamoto XL LoRA). It's only used when `/workspace/models.json` doesn't already exist on the volume — i.e. for first-time users with no orchestrator pre-staging.
+
+For multi-model runs, the orchestrator writes a full `models.json` onto the network volume **before** the pod starts, and the baked-in template is ignored. The reference multi-model manifest lives in the `cloud-ai-image-generation` skill:
+
+```
+~/.hermes/skills/devops/cloud-ai-image-generation/references/models.json
+```
+
+That file is the source of truth for which models to download in a real run. Edit it freely; don't edit the in-image `models-template.json` unless you're changing the fallback example.
+
+## Quick Start
+
+### 1. Drop a `models.json` on the volume
 
 ```json
 {
   "checkpoints": [
     {
-      "name": "Illustrious-XL-v0.1",
-      "url": "https://huggingface.co/.../resolve/main/Illustrious-XL-v0.1.safetensors",
-      "dest": "checkpoints/Illustrious-XL-v0.1.safetensors",
-      "size": 6938292816,
+      "name": "animagine-xl-4.0",
+      "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
+      "dest": "checkpoints/animagine-xl-4.0.safetensors",
+      "size": 6938040794,
       "auth": "huggingface"
     }
   ]
 }
 ```
+
+Or just point the orchestrator at the skill's `models.json` and skip this step entirely.
 
 ### 2. Launch (example: RunPod)
 

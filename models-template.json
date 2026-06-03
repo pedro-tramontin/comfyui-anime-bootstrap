@@ -1,36 +1,28 @@
 {
+  "_comment": "Minimal fallback model manifest baked into the Docker image. Used by bootstrap.sh ONLY when /workspace/models.json does not exist on the volume (i.e. first-time users with no orchestrator pre-staging). For real runs, the orchestrator (e.g. asuka_multi_model_smoke.py in the cloud-ai-image-generation skill) writes the full multi-model manifest onto the network volume BEFORE the pod starts, and this file is ignored.",
+
   "checkpoints": [
     {
-      "name": "animagine-xl-3.1",
-      "url": "https://huggingface.co/cagliostrolab/animagine-xl-3.1/resolve/main/animagine-xl-3.1.safetensors",
-      "dest": "checkpoints/animagineXLV31_v31.safetensors",
-      "size": 6938400000,
-      "auth": "none"
-    },
-    {
-      "name": "Pony-Diffusion-V6-XL",
-      "url": "https://huggingface.co/AstraliteHeart/pony-diffusion-v6-xl/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
-      "dest": "checkpoints/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
-      "size": 6938400000,
-      "auth": "huggingface"
-    },
-    {
-      "name": "Illustrious-XL-v0.1",
-      "url": "https://huggingface.co/Illustrious-XL/Illustrious-XL-0.1/resolve/main/Illustrious-XL-v0.1.safetensors",
-      "dest": "checkpoints/Illustrious-XL-v0.1.safetensors",
-      "size": 6938400000,
-      "auth": "none"
+      "name": "animagine-xl-4.0",
+      "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
+      "dest": "checkpoints/animagine-xl-4.0.safetensors",
+      "size": 6938040794,
+      "auth": "huggingface",
+      "note": "Single worked example. Public HF repo (no auth strictly required; the bootstrap always sends the Authorization header when auth=huggingface). To run a multi-model pipeline, drop a real models.json at /workspace/models.json on the volume and this file will be ignored."
     }
   ],
+
   "loras": [
     {
-      "name": "Sadamoto-Yoshiyuki-PONY-XL",
-      "url": "https://civitai.com/api/download/models/391692",
+      "name": "illustrious-style-sdxl",
+      "url": "https://civitai.com/api/download/models/391692?token=${CIVITAI_API_KEY}",
       "dest": "loras/Sadamoto_Yoshiyuki_XL_PONY.safetensors",
       "size": 359000000,
-      "auth": "civitai"
+      "auth": "civitai",
+      "note": "Sadamoto Yoshiyuki XL LoRA. Optional, only used by the Animagine workflow template."
     }
   ],
+
   "vae": [],
   "text_encoders": [],
   "controlnet": []
