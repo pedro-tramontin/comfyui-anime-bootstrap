@@ -1,9 +1,47 @@
 # syntax=docker/dockerfile:1
-FROM pytorch/pytorch:2.12.0-cuda13.0-cudnn9-runtime
+#
+# ComfyUI Anime Bootstrap — base image
+# ------------------------------------
+# Single-variant image. The base pytorch/pytorch tag, PyTorch version, CUDA
+# version, and minimum NVIDIA driver are passed as build args. The
+# pytorch/pytorch tag itself is DERIVED from PYROCH_VERSION + CUDA_VERSION
+# as `<pytorch>-cuda<cuda>-cudnn9-runtime` — we don't take it as a separate
+# arg. See .github/workflows/build.yml for the current defaults and how to
+# override them on a manual workflow trigger.
+#
+# Image tag scheme: cuda<MAJOR>.<MINOR>-pytorch<MAJOR>.<MINOR>.<PATCH>
+# Example:         ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+#
+# Build with custom values:
+#   docker build --build-arg CUDA_VERSION=12.1 \
+#                --build-arg PYTORCH_VERSION=2.5.1 \
+#                --build-arg DRIVER_FLOOR=12010 .
 
+# Derive the base image tag from CUDA + PyTorch versions. We declare the
+# pre-FROM ARGs (PYTORCH_VERSION, CUDA_VERSION) here so we can reference
+# their defaults in the FROM line — and then re-declare them with the
+# same defaults post-FROM for the rest of the Dockerfile.
+ARG PYTORCH_VERSION=2.12.0
+ARG CUDA_VERSION=13.0
+FROM pytorch/pytorch:${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn9-runtime
+
+# Build args (must come after FROM to be visible in the rest of the Dockerfile).
+# Defaults match the current "latest" variant in .github/workflows/build.yml.
+ARG CUDA_VERSION=13.0
+ARG PYTORCH_VERSION=2.12.0
+# DRIVER_FLOOR is consumed only by the OCI label below — integration tests
+# read it via `docker inspect` to decide whether to skip CUDA-touching tests
+# on hosts whose NVIDIA driver is too old for the base pytorch/cuda combo.
+ARG DRIVER_FLOOR=12080
+
+# OCI / container labels — consumers can read these via `docker inspect` or
+# `crane manifest` to pick the right image for their host's driver.
 LABEL org.opencontainers.image.title="comfyui-anime-bootstrap"
 LABEL org.opencontainers.image.description="Cloud-native ComfyUI base for anime model pipelines (RunPod, Vast.ai, local)"
 LABEL org.opencontainers.image.source="https://github.com/pedro-tramontin/comfyui-anime-bootstrap"
+LABEL org.opencontainers.image.cuda.version="${CUDA_VERSION}"
+LABEL org.opencontainers.image.pytorch.version="${PYTORCH_VERSION}"
+LABEL com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor="${DRIVER_FLOOR}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1

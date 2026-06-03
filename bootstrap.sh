@@ -25,6 +25,17 @@ mkdir -p "$MODELS_ROOT/checkpoints" "$MODELS_ROOT/loras" \
          "$MODELS_ROOT/vae" "$MODELS_ROOT/clip_vision" \
          "$MODELS_ROOT/text_encoders" "$MODELS_ROOT/controlnet" 2>/dev/null
 
+# Disk-space precheck — bail out early with a clear "out of disk" message
+# rather than spending 20 minutes on a download that will fail halfway through.
+# Counts expected total bytes from the manifest and compares to available free
+# space on the destination filesystem. If we don't have room, we log it and
+# continue without downloads (ComfyUI can still start; user can free space
+# or re-run the bootstrap).
+echo "[disk] Checking available space on $(df -P "$MODELS_ROOT" 2>/dev/null | tail -1 | awk '{print $6}' || echo "$MODELS_ROOT")"
+df_kb=$(df -Pk "$MODELS_ROOT" 2>/dev/null | tail -1 | awk '{print $4}')
+df_bytes=$((df_kb * 1024))
+echo "[disk] Free: $(numfmt --to=iec --suffix=B "$df_bytes" 2>/dev/null || echo "${df_bytes} bytes")"
+
 # Update ComfyUI + Manager best-effort (shallow clones, so git pull is unreliable)
 # Only do this if 6+ hours have passed since last update.
 UPDATE_MARKER="/workspace/.last_update"
@@ -62,39 +73,61 @@ download_file() {
     local dest="$3"
     local auth_type="$4"
     local tmp="$dest.tmp"
+    local timeout_sec=900   # hard cap per download; once hit, abandon to keep ComfyUI starting
 
     mkdir -p "$(dirname "$dest")"
 
-    # Stale .tmp cleanup: if a prior run left a corrupt .tmp, delete it
+    # Stale .tmp cleanup — ALWAYS remove any prior .tmp before this attempt.
+    # Without this, a fresh aria2c call sees a partial file and tries to resume;
+    # if the URL is HF xet-bridge and the local .tmp is corrupt, the resume fails.
     if [ -f "$tmp" ]; then
-        echo "  [cleanup] Removing stale $tmp from prior failed download"
+        local stale_size=$(stat -c%s "$tmp" 2>/dev/null || stat -f%z "$tmp" 2>/dev/null || echo 0)
+        echo "  [cleanup] Removing stale $tmp ($stale_size bytes from prior attempt)"
         rm -f "$tmp"
     fi
 
-    if [ "$auth_type" = "huggingface" ] && [ -n "$hf_token" ]; then
-        echo "  Downloading $name (HF auth)..."
-        wget --tries=1 --timeout=120 --progress=dot:giga \
-             --header="Authorization: Bearer $hf_token" \
-             -O "$tmp" "$url" 2>&1 | tail -5
-    elif [ "$auth_type" = "civitai" ] && [ -n "$civitai_token" ]; then
-        echo "  Downloading $name (Civitai auth)..."
-        local auth_url="${url}?token=${civitai_token}"
-        aria2c --continue=true --max-connection-per-server=16 --split=8 \
-               --min-split-size=10M --dir="$(dirname "$tmp")" --out="$(basename "$tmp")" \
-               --allow-overwrite=true --quiet "$auth_url" 2>/dev/null \
-        || wget --tries=1 --timeout=120 --progress=dot:giga -O "$tmp" "$auth_url" 2>&1 | tail -5
-    else
-        echo "  Downloading $name (public)..."
-        aria2c --continue=true --max-connection-per-server=16 --split=8 \
-               --min-split-size=10M --dir="$(dirname "$tmp")" --out="$(basename "$tmp")" \
-               --allow-overwrite=true --quiet "$url" 2>/dev/null \
-        || wget --tries=1 --timeout=120 --progress=dot:giga -O "$tmp" "$url" 2>&1 | tail -5
+    # aria2c is the preferred tool — it handles HF's xet-bridge redirects,
+    # multi-connection downloads, and resumability correctly. We always run it
+    # first; only fall back to wget for auth/CORS edge cases.
+    local final_url="$url"
+    if [ "$auth_type" = "civitai" ] && [ -n "$civitai_token" ]; then
+        final_url="${url}?token=${civitai_token}"
     fi
+
+    local extra_args=()
+    if [ "$auth_type" = "huggingface" ] && [ -n "$hf_token" ]; then
+        extra_args+=("--header=Authorization: Bearer $hf_token")
+    fi
+
+    echo "  Downloading $name (${auth_type:-public}, aria2c)..."
+    timeout "$timeout_sec" aria2c \
+        --continue=false \
+        --max-connection-per-server=16 \
+        --split=8 \
+        --min-split-size=10M \
+        --dir="$(dirname "$tmp")" \
+        --out="$(basename "$tmp")" \
+        --allow-overwrite=true \
+        --console-log-level=warn \
+        "${extra_args[@]}" \
+        "$final_url" 2>&1 | tail -5
 
     local rc=$?
     if [ $rc -ne 0 ] || [ ! -s "$tmp" ]; then
+        # Fallback to wget — only useful for trivial public URLs (wget breaks on HF xet-bridge)
+        echo "  [fallback] aria2c failed (rc=$rc), trying wget..."
+        rm -f "$tmp"
+        local wget_args=(--tries=2 --timeout=60 -O "$tmp")
+        if [ "$auth_type" = "huggingface" ] && [ -n "$hf_token" ]; then
+            wget_args+=("--header=Authorization: Bearer $hf_token")
+        fi
+        timeout "$timeout_sec" wget "${wget_args[@]}" "$final_url" 2>&1 | tail -3
+        rc=$?
+    fi
+
+    if [ $rc -ne 0 ] || [ ! -s "$tmp" ]; then
         echo "  WARN: Failed to download $name (rc=$rc) — continuing without it"
-        echo "        You can re-run manually: wget -O '$dest' '$url'"
+        echo "        You can re-run manually: aria2c --dir='$(dirname "$dest")' --out='$(basename "$dest")' '$url'"
         rm -f "$tmp"
         return 0  # CRITICAL: do not fail the bootstrap
     fi
@@ -111,6 +144,44 @@ if [ ! -f "$MANIFEST" ]; then
     echo "[models] No manifest present — skipping all model downloads. ComfyUI will start with whatever is on the volume."
     echo "=== Bootstrap complete (no manifest) ==="
     exit 0
+fi
+
+# Disk-space precheck: sum the expected bytes of all models that are NOT
+# already present and verified. If we don't have room for that, warn loudly
+# and continue (the per-model loop will fail individually and log WARN — but
+# at least the user will see the early warning explaining the root cause).
+# We allow a 1GB safety margin for filesystem overhead and other writes.
+safety_margin=$((1024 * 1024 * 1024))   # 1 GiB
+needed_bytes=0
+needed_files=0
+while IFS= read -r entry; do
+    size=$(echo "$entry" | jq -r '.size // 0')
+    dest_rel=$(echo "$entry" | jq -r '.dest // ""')
+    dest="$MODELS_ROOT/$dest_rel"
+    if [ -f "$dest" ] && [ -n "$size" ] && [ "$size" -gt 0 ]; then
+        actual_size=$(stat -c%s "$dest" 2>/dev/null || stat -f%z "$dest" 2>/dev/null || echo "0")
+        if [ "$actual_size" = "$size" ]; then
+            continue   # already present, don't count
+        fi
+    fi
+    needed_bytes=$((needed_bytes + size))
+    needed_files=$((needed_files + 1))
+done < <(jq -c '.[][] | select(has("url"))' "$MANIFEST" 2>/dev/null)
+
+if [ "$needed_files" -gt 0 ]; then
+    needed_iec=$(numfmt --to=iec --suffix=B "$needed_bytes" 2>/dev/null || echo "${needed_bytes} bytes")
+    free_iec=$(numfmt --to=iec --suffix=B "$df_bytes" 2>/dev/null || echo "${df_bytes} bytes")
+    echo "[disk] Need to download $needed_files model(s), $needed_iec total"
+    echo "[disk] Free on volume: $free_iec"
+    if [ "$df_bytes" -lt "$((needed_bytes + safety_margin))" ]; then
+        echo ""
+        echo "  ⚠️  WARNING: Insufficient disk space on the network volume!"
+        echo "  ⚠️  Need ~$needed_iec (plus 1 GiB safety margin) but only $free_iec is free."
+        echo "  ⚠️  Downloads will likely fail with disk-full errors."
+        echo "  ⚠️  Either: (a) free up space on the volume, (b) reduce the model list in $MANIFEST,"
+        echo "  ⚠️  or (c) attach a larger volume. Continuing anyway — per-model failures will be logged."
+        echo ""
+    fi
 fi
 
 # Build a list of all model entries (across all top-level arrays)
