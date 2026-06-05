@@ -91,9 +91,41 @@ download_file() {
     # aria2c is the preferred tool — it handles HF's xet-bridge redirects,
     # multi-connection downloads, and resumability correctly. We always run it
     # first; only fall back to wget for auth/CORS edge cases.
+    #
+    # Auth/URL handling: the manifest convention is to use ${HF_TOKEN} and
+    # ${CIVITAI_API_KEY} as placeholders inside the URL itself. We expand
+    # them in-place here BEFORE considering whether to add a token to the
+    # URL — that way, a manifest with a ${CIVITAI_API_KEY} placeholder gets
+    # exactly one token, and we never double-append ?token= (the previous
+    # behaviour silently produced a malformed query string when both the
+    # manifest had a placeholder AND the env var was set).
+    #
+    # If the env var is empty, we LEAVE the literal placeholder in the URL
+    # — that way the URL round-trips cleanly to the WARN message and to
+    # `huggingface-cli download` / manual re-runs, and the bootstrap log
+    # makes the missing-auth case obvious from the URL alone.
+    if [ -n "$civitai_token" ]; then
+        url="${url//\$\{CIVITAI_API_KEY\}/$civitai_token}"
+    fi
+    if [ -n "$hf_token" ]; then
+        url="${url//\$\{HF_TOKEN\}/$hf_token}"
+    fi
+
     local final_url="$url"
-    if [ "$auth_type" = "civitai" ] && [ -n "$civitai_token" ]; then
-        final_url="${url}?token=${civitai_token}"
+    # Backstop: if a civitai URL has no token at all (manifest author
+    # forgot the placeholder) and we have a token in env, append one.
+    # Use & if the URL already has a query string, ? otherwise.
+    # We do a plain substring check for "?token=" or "&token=" (the
+    # only two valid positions for a query param) to keep the test
+    # portable across bash versions where [[ =~ ]] regex semantics
+    # can be surprising with character classes.
+    if [ "$auth_type" = "civitai" ] && [ -n "$civitai_token" ] && \
+       [ "${url#*?token=}" = "$url" ] && [ "${url#*&token=}" = "$url" ]; then
+        if [ "${url#*\?}" != "$url" ]; then
+            final_url="${url}&token=${civitai_token}"
+        else
+            final_url="${url}?token=${civitai_token}"
+        fi
     fi
 
     local extra_args=()
@@ -168,7 +200,7 @@ while IFS= read -r entry; do
     fi
     needed_bytes=$((needed_bytes + size))
     needed_files=$((needed_files + 1))
-done < <(jq -c '.[][] | select(has("url"))' "$MANIFEST" 2>/dev/null)
+done < <(jq -c '.[] | arrays | .[] | select(has("url"))' "$MANIFEST" 2>/dev/null)
 
 if [ "$needed_files" -gt 0 ]; then
     needed_iec=$(numfmt --to=iec --suffix=B "$needed_bytes" 2>/dev/null || echo "${needed_bytes} bytes")
@@ -187,13 +219,13 @@ if [ "$needed_files" -gt 0 ]; then
 fi
 
 # Build a list of all model entries (across all top-level arrays)
-model_count=$(jq -c '[.[][] | select(has("url"))] | length' "$MANIFEST" 2>/dev/null || echo "0")
+model_count=$(jq -c '[.[] | arrays | .[] | select(has("url"))] | length' "$MANIFEST" 2>/dev/null || echo "0")
 present_count=0
 missing_count=0
 failed_count=0
 
 # Iterate the manifest
-jq -c '.[][] | select(has("url"))' "$MANIFEST" 2>/dev/null | while IFS= read -r line; do
+jq -c '.[] | arrays | .[] | select(has("url"))' "$MANIFEST" 2>/dev/null | while IFS= read -r line; do
     name=$(echo "$line" | jq -r '.name // "unknown"')
     url=$(echo "$line" | jq -r '.url // ""')
     dest_rel=$(echo "$line" | jq -r '.dest // ""')
