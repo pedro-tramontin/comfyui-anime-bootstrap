@@ -25,6 +25,11 @@ on:
         required: false
         type: boolean
         default: true
+      tag_prefix:
+        description: 'Optional prefix prepended to the variant tag (e.g. "v1.0.0-" produces "v1.0.0-cuda12.4-pytorch2.6.0"). Leave blank for the default "cuda<X>-pytorch<Y>" tag.'
+        required: false
+        type: string
+        default: ''
 
 defaults:
   run:
@@ -55,16 +60,18 @@ jobs:
           in_pytorch: ${{ inputs.pytorch }}
           in_driver_floor: ${{ inputs.driver_floor }}
           in_is_latest: ${{ inputs.is_latest }}
+          in_tag_prefix: ${{ inputs.tag_prefix }}
         run: |
           set -euo pipefail
           CUDA="${in_cuda:-13.0}"
           PYTORCH="${in_pytorch:-2.12.0}"
           DRIVER_FLOOR="${in_driver_floor:-12080}"
           IS_LATEST="${in_is_latest:-true}"
+          TAG_PREFIX="${in_tag_prefix:-}"
 
           PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
           VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
-          TAGS="${REGISTRY}/${IMAGE_NAME}:${VARIANT_TAG}"
+          TAGS="${REGISTRY}/${IMAGE_NAME}:${TAG_PREFIX}${VARIANT_TAG}"
           if [ "${IS_LATEST}" = "true" ]; then
             TAGS="${TAGS},${REGISTRY}/${IMAGE_NAME}:latest"
           fi
@@ -75,6 +82,7 @@ jobs:
             printf 'pytorch=%s\n'      "${PYTORCH}"
             printf 'driver_floor=%s\n' "${DRIVER_FLOOR}"
             printf 'is_latest=%s\n'    "${IS_LATEST}"
+            printf 'tag_prefix=%s\n'   "${TAG_PREFIX}"
             printf 'variant_tag=%s\n'  "${VARIANT_TAG}"
             printf 'tags=%s\n'         "${TAGS}"
           } >> "$GITHUB_OUTPUT"
@@ -85,6 +93,7 @@ jobs:
           echo "pytorch:      ${PYTORCH}"
           echo "driver_floor: ${DRIVER_FLOOR}"
           echo "is_latest:    ${IS_LATEST}"
+          echo "tag_prefix:   ${TAG_PREFIX}"
           echo "image tags:   ${TAGS}"
           echo "----------------------------"
 
