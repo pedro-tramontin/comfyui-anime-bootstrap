@@ -1,0 +1,67 @@
+name: Release (build and push versioned image)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  CUDA_VERSION: '13.0'
+  PYTORCH_VERSION: '2.12.0'
+  DRIVER_FLOOR: '12080'
+
+jobs:
+  release:
+    name: build-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Read version
+        id: cfg
+        run: |
+          set -euo pipefail
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building release ${VERSION} (cuda=${CUDA_VERSION}, pytorch=${PYTORCH_VERSION})"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push release image
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.cfg.outputs.version }}"
+          TAG="${REGISTRY}/${IMAGE_NAME}:v${VERSION}"
+          LATEST="${REGISTRY}/${IMAGE_NAME}:latest"
+
+          docker build \
+            --build-arg CUDA_VERSION="${CUDA_VERSION}" \
+            --build-arg PYTORCH_VERSION="${PYTORCH_VERSION}" \
+            --build-arg DRIVER_FLOOR="${DRIVER_FLOOR}" \
+            -t "${TAG}" \
+            .
+
+          docker push "${TAG}"
+          docker tag "${TAG}" "${LATEST}"
+          docker push "${LATEST}"
+
+          echo ""
+          echo "=== Release complete ==="
+          echo "Published v${VERSION}"
+          echo "  - ${TAG}"
+          echo "  - ${LATEST}"
