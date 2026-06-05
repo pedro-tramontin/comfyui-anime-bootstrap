@@ -5,11 +5,32 @@ A cloud-native, GPU-ready Docker image for running ComfyUI with anime diffusion 
 ## Features
 
 - **Base image**: built on a `pytorch/pytorch` tag — see [Base images & tags](#base-images--tags) below.
-- **Pre-installed**: ComfyUI (in `/opt/ComfyUI`, volume-mount friendly) + ComfyUI-Manager + aria2 (fast resume downloads)
+- **Pre-installed**: ComfyUI (in `/opt/ComfyUI`, volume-mount friendly) + ComfyUI-Manager + ComfyUI_GalleryManager + aria2 (fast resume downloads)
 - **Model bootstrap**: `models.json` manifest for idempotent, resumable downloads
 - **SSH ready**: Host keys generated at container start (secure, no baked keys)
 - **Volume-mount safe**: ComfyUI source lives outside `/workspace`, so attaching a RunPod network volume doesn't shadow the installation
 - **Multi-provider**: Tested on RunPod and Vast.ai
+
+## Bundled Gallery
+
+The image ships with **ComfyUI_GalleryManager** baked into `/opt/ComfyUI/custom_nodes/ComfyUI_GalleryManager/`. On first boot, ComfyUI auto-discovers it and registers a `/gallery` route — no scp, no first-boot install, no `__pycache__` traps.
+
+Open the gallery in a browser at:
+
+```
+http://<pod-ip>:8188/gallery
+```
+
+(Or just `/gallery` — a 302 redirect serves the trailing-slash URL too.)
+
+The gallery features:
+- Browsable, searchable, recursive folder view of `/opt/ComfyUI/output`
+- PNG metadata extraction (model, LoRA, seed, steps, CFG, sampler, prompts)
+- Video support: MP4/WebM/MOV/AVI/MKV playback with ffmpeg-generated thumbnails
+- Subfolder CRUD (create, rename, delete)
+- JSONL metadata sidecar for fast search across thousands of files
+
+> **Where output lives:** the gallery scans `/opt/ComfyUI/output` by default. If you mount a network volume that shadows `/opt/ComfyUI/output` (rare — most users mount at `/workspace`), the gallery auto-falls back to `/workspace/ComfyUI/output`.
 
 ## Base images & tags
 

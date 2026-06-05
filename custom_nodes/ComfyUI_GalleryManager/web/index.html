@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComfyUI Output Manager v5</title>
+<style>
+:root{--bg:#0b0b0b;--card:#161616;--text:#e6e6e6;--accent:#ff4757;--accent2:#2ed573;--border:#2a2a2a;--muted:#888;}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);}
+header{padding:1.2rem 1.5rem;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;}
+header h1{margin:0;font-size:1.3rem;flex:1 1 100%;}
+#breadcrumbs{display:flex;gap:.4rem;align-items:center;flex:1 1 100%;font-size:.85rem;color:var(--muted);margin-top:.3rem;}
+#breadcrumbs span{cursor:pointer;color:var(--text);}
+#breadcrumbs span:hover{text-decoration:underline;}
+#search{padding:.5rem .7rem;border-radius:6px;border:1px solid #444;background:#222;color:var(--text);width:min(320px,50%);font-size:.9rem;}
+header button{padding:.5rem .9rem;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:.85rem;cursor:pointer;}
+header button.secondary{background:#333;color:var(--text);}
+header button:disabled{opacity:.4;cursor:not-allowed;}
+header button.hidden-on{background:#444;color:var(--accent);}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;padding:1.5rem;}
+.card{background:var(--card);border-radius:8px;overflow:hidden;border:1px solid var(--border);transition:border-color .15s;position:relative;}
+.card:hover{border-color:var(--accent);}
+.card.selected{border-color:var(--accent2);box-shadow:0 0 0 2px var(--accent2);}
+.card.hidden-file{opacity:.6;border-color:#333;}
+.card .thumb{position:relative;height:180px;background:#111;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.card .thumb img{max-width:100%;max-height:100%;object-fit:cover;display:block;border-radius:4px;}
+.card .thumb .folder-icon{font-size:3.5rem;opacity:.6;color:var(--text);}
+.card .play-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:48px;height:48px;background:rgba(128,90,213,.9);border-radius:50%;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2;}
+.card .play-overlay::after{content:'';width:0;height:0;border-left:16px solid #fff;border-top:10px solid transparent;border-bottom:10px solid transparent;margin-left:4px;}
+.card .overlay{position:absolute;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;gap:.5rem;}
+.card:hover .overlay{display:flex;}
+.card .overlay button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:.4rem .7rem;border-radius:4px;cursor:pointer;font-size:.8rem;}
+.card .overlay button:hover{background:rgba(255,255,255,.3);}
+.card .info{padding:.5rem .7rem;font-size:.78rem;color:#aaa;display:flex;align-items:center;gap:.4rem;}
+.card .info input[type="checkbox"]{cursor:pointer;}
+.card .info .name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.card .info .name[contenteditable="true"]{background:#222;outline:none;padding:0 .2rem;border-radius:3px;}
+#lightbox{position:fixed;inset:0;background:rgba(0,0,0,.94);display:none;align-items:center;justify-content:center;z-index:100;}
+#lightbox .lb-wrap{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:100%;}
+#lightbox #mediaContainer{display:flex;align-items:center;justify-content:center;}
+#lightbox #mediaContainer img{max-width:92vw;max-height:88vh;border-radius:6px;box-shadow:0 0 60px rgba(0,0,0,.8);cursor:pointer;}
+#lightbox #mediaContainer video{max-width:92vw;max-height:88vh;border-radius:6px;box-shadow:0 0 60px rgba(0,0,0,.8);}
+#lightbox .nav{position:absolute;top:0;bottom:0;width:15%;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;}
+#lightbox .nav:hover{background:rgba(255,255,255,.04);}
+#lightbox .nav.prev{left:0;}
+#lightbox .nav.next{right:0;}
+#lightbox .nav .chevron{color:#fff;font-size:2.5rem;opacity:.5;}
+#lightbox .nav:hover .chevron{opacity:.9;}
+#lightbox .close{position:absolute;top:.6rem;right:1rem;font-size:2.2rem;color:#fff;cursor:pointer;z-index:6;}
+#lightbox .dl{position:absolute;bottom:1rem;right:1rem;color:var(--accent);text-decoration:none;font-size:.85rem;z-index:6;background:rgba(0,0,0,.5);padding:.3rem .7rem;border-radius:4px;}
+#lightbox .counter{position:absolute;bottom:1rem;left:1rem;color:#fff;opacity:.6;font-size:.85rem;z-index:6;}
+#empty{text-align:center;padding:4rem 1rem;color:#666;font-size:1rem;}
+#toast{position:fixed;bottom:1rem;right:1rem;background:var(--card);border:1px solid var(--border);padding:.7rem 1rem;border-radius:6px;font-size:.85rem;z-index:200;opacity:0;transition:opacity .3s;}
+#toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<header>
+  <h1>ComfyUI Output Manager <span id="count" style="opacity:.5;font-size:.85rem;"></span></h1>
+  <div id="breadcrumbs"></div>
+  <input id="search" type="text" placeholder="Search..." autocomplete="off">
+  <button id="toggleHiddenBtn" class="secondary">Show Hidden</button>
+  <button id="refreshBtn" class="secondary">Refresh</button>
+  <button id="newFolderBtn" class="secondary">New Folder</button>
+  <button id="selAllBtn" class="secondary">Select All</button>
+  <button id="delBtn" disabled>Delete Selected</button>
+</header>
+<div id="grid" class="grid"></div>
+<div id="empty" style="display:none">No images or videos found.</div>
+<div id="lightbox">
+  <div class="close" onclick="closeLb()">×</div>
+  <div class="lb-wrap">
+    <div class="nav prev" onclick="goPrev(event)"><span class="chevron">‹</span></div>
+    <div id="mediaContainer"></div>
+    <div class="nav next" onclick="goNext(event)"><span class="chevron">›</span></div>
+  </div>
+  <a class="dl" id="lb-dl" href="" target="_blank" download>Download</a>
+  <div class="counter" id="lb-counter"></div>
+</div>
+<div id="toast"></div>
+<script>
+const API = '/gallery/api';
+let files = [], folders = [], selected = new Set(), currentPath = '', lbIndex = -1, showHidden = false, currentVideo = null;
+
+async function load() {
+  let url = API + '/list';
+  const params = [];
+  if (currentPath) params.push('subfolder=' + encodeURIComponent(currentPath));
+  if (showHidden) params.push('show_hidden=1');
+  if (params.length) url += '?' + params.join('&');
+  const r = await fetch(url);
+  const d = await r.json();
+  files = d.files || [];
+  folders = d.folders || [];
+  currentPath = d.current_path || '';
+  selected.clear();
+  renderBreadcrumbs();
+  render();
+}
+
+function fmtSize(b) { if(b>1e6)return (b/1e6).toFixed(1)+' MB'; if(b>1e3)return (b/1e3).toFixed(1)+' KB'; return b+' B'; }
+function timeAgo(t) { const s=Math.floor((Date.now()/1000)-t); if(s<60)return s+'s ago'; if(s<3600)return Math.floor(s/60)+'m ago'; if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
+
+function renderBreadcrumbs() {
+  const bc = document.getElementById('breadcrumbs');
+  let parts = currentPath ? currentPath.split('/').filter(Boolean) : [];
+  let html = '<span onclick="changePath(\'\')">Output</span>';
+  let acc = '';
+  parts.forEach(p => { acc += (acc ? '/' : '') + p; html += ` / <span onclick="changePath('${acc}')">${p}</span>`; });
+  bc.innerHTML = html;
+}
+
+function changePath(p) { currentPath = p; load(); }
+
+function render() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const fFiles = files.filter(f => f.name.toLowerCase().includes(q));
+  const fFolders = folders.filter(f => f.name.toLowerCase().includes(q));
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  const total = fFolders.length + fFiles.length;
+  document.getElementById('count').textContent = total + ' items';
+  if(!total){ grid.innerHTML=''; empty.style.display=''; return; }
+  empty.style.display='none';
+
+  let html = '';
+  fFolders.forEach(f => {
+    const thumb = f.thumbnail_url ? `<img loading="lazy" src="${f.thumbnail_url}" alt="${f.name}" style="max-width:100%;max-height:100%;object-fit:cover;border-radius:4px;">` : '<span class="folder-icon">📁</span>';
+    html += `<div class="card" data-name="${f.name}">
+      <div class="thumb" onclick="enterFolder('${f.name}')">${thumb}</div>
+      <div class="info">
+        <span class="name">📁 ${f.name}</span>
+      </div>
+    </div>`;
+  });
+  fFiles.forEach(f => {
+    const sel = selected.has(f.name) ? 'selected' : '';
+    const hiddenCls = f.name.startsWith('.') ? 'hidden-file' : '';
+    const isVideo = f.is_video;
+    let thumbHtml = '';
+    if (isVideo && f.thumbnail_url) {
+      thumbHtml = `<img loading="lazy" src="${f.thumbnail_url}" alt="${f.name}" style="max-width:100%;max-height:100%;object-fit:cover;border-radius:4px;"><div class="play-overlay"></div>`;
+    } else if (isVideo) {
+      thumbHtml = `<div style="height:180px;background:#111;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.75rem">Video</div><div class="play-overlay"></div>`;
+    } else {
+      thumbHtml = `<img loading="lazy" src="${f.url}" alt="${f.name}" style="max-width:100%;max-height:100%;object-fit:cover;border-radius:4px;">`;
+    }
+    html += `<div class="card ${sel} ${hiddenCls}" data-name="${f.name}">
+      <div class="thumb" onclick="openLb('${f.name}')">
+        ${thumbHtml}
+        <div class="overlay">
+          <button onclick="event.stopPropagation();dl('${f.url}','${f.name}')">Download</button>
+          <button onclick="event.stopPropagation();editName('${f.name}')">Rename</button>
+        </div>
+      </div>
+      <div class="info">
+        <input type="checkbox" ${sel?'checked':''} onchange="toggleSel('${f.name}')">
+        <span class="name" id="n-${f.name}" onclick="editName('${f.name}')" title="Click to rename">${f.name}</span>
+        <span style="margin-left:auto;opacity:.5;">${fmtSize(f.size)} &middot; ${timeAgo(f.mtime)}</span>
+      </div>
+    </div>`;
+  });
+  grid.innerHTML = html;
+  document.getElementById('delBtn').disabled = selected.size === 0;
+}
+
+function toggleHidden() {
+  showHidden = !showHidden;
+  const btn = document.getElementById('toggleHiddenBtn');
+  btn.textContent = showHidden ? 'Hide Hidden' : 'Show Hidden';
+  btn.classList.toggle('hidden-on', showHidden);
+  load();
+}
+
+function enterFolder(name) { currentPath = currentPath ? currentPath + '/' + name : name; load(); }
+function toggleSel(name){ selected.has(name) ? selected.delete(name) : selected.add(name); render(); }
+function selAll(){ if(selected.size === files.length){ selected.clear(); } else { files.forEach(f=>selected.add(f.name)); } render(); }
+
+async function delSelected() {
+  if(!selected.size || !confirm('Delete ' + selected.size + ' item(s)?')) return;
+  const r = await fetch(API + '/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({subfolder: currentPath, files:[...selected]})});
+  const d = await r.json();
+  showToast('Deleted ' + (d.deleted||[]).length + ' items');
+  selected.clear();
+  load();
+}
+
+function openLb(name) {
+  const idx = files.findIndex(f => f.name === name);
+  if(idx === -1) return;
+  lbIndex = idx;
+  updateLb();
+  document.getElementById('lightbox').style.display='flex';
+}
+function updateLb() {
+  if(lbIndex < 0 || lbIndex >= files.length) return;
+  const f = files[lbIndex];
+  const container = document.getElementById('mediaContainer');
+  const dl = document.getElementById('lb-dl');
+  dl.href = f.url;
+  dl.setAttribute('download', f.name);
+  document.getElementById('lb-counter').textContent = (lbIndex + 1) + ' / ' + files.length;
+  if (f.is_video) {
+    container.innerHTML = `<video controls autoplay src="${f.url}" style="max-width:92vw;max-height:88vh;border-radius:6px;box-shadow:0 0 60px rgba(0,0,0,.8);"></video>`;
+    currentVideo = container.querySelector('video');
+  } else {
+    container.innerHTML = `<img src="${f.url}" style="max-width:92vw;max-height:88vh;border-radius:6px;box-shadow:0 0 60px rgba(0,0,0,.8);cursor:pointer;" onclick="closeLb()">`;
+    currentVideo = null;
+  }
+}
+function closeLb() {
+  if (currentVideo) { currentVideo.pause(); currentVideo = null; }
+  document.getElementById('lightbox').style.display='none';
+  lbIndex = -1;
+}
+function goPrev(e) { e.stopPropagation(); if(lbIndex > 0){ lbIndex--; updateLb(); } }
+function goNext(e) { e.stopPropagation(); if(lbIndex < files.length - 1){ lbIndex++; updateLb(); } }
+function dl(url,name){ const a=document.createElement('a'); a.href=url; a.download=name; a.click(); }
+
+function editName(oldName) {
+  const el = document.getElementById('n-' + oldName);
+  if(!el || el.isContentEditable) return;
+  el.contentEditable = true; el.focus();
+  el.onblur = async () => {
+    el.contentEditable = false;
+    const newName = el.textContent.trim();
+    if(newName && newName !== oldName) {
+      const r = await fetch(API + '/rename', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({subfolder: currentPath, old:oldName, new:newName})});
+      const d = await r.json();
+      if(d.ok){ showToast('Renamed'); load(); } else { showToast(d.error||'Rename failed'); el.textContent = oldName; }
+    }
+  };
+  el.onkeydown = e => { if(e.key==='Enter'){ e.preventDefault(); el.blur(); } };
+}
+
+async function newFolder() {
+  const name = prompt('New folder name:');
+  if(!name || name.includes('/') || name.includes('\\') || name.startsWith('.')) { showToast('Invalid name'); return; }
+  const r = await fetch(API + '/mkdir', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({subfolder: currentPath, name})});
+  const d = await r.json();
+  if(d.ok){ showToast('Folder created'); load(); } else { showToast(d.error || 'Failed'); }
+}
+
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2500); }
+
+document.getElementById('toggleHiddenBtn').onclick = toggleHidden;
+document.getElementById('refreshBtn').onclick = load;
+document.getElementById('newFolderBtn').onclick = newFolder;
+document.getElementById('selAllBtn').onclick = selAll;
+document.getElementById('delBtn').onclick = delSelected;
+document.getElementById('search').oninput = render;
+document.addEventListener('keydown', e => {
+  if(document.getElementById('lightbox').style.display !== 'flex') return;
+  if(e.key==='Escape') closeLb();
+  if(e.key==='ArrowLeft') goPrev({stopPropagation:()=>{}});
+  if(e.key==='ArrowRight') goNext({stopPropagation:()=>{}});
+  if(e.key===' ' && currentVideo) { e.preventDefault(); currentVideo.paused ? currentVideo.play() : currentVideo.pause(); }
+});
+load();
+</script>
+</body>
+</html>

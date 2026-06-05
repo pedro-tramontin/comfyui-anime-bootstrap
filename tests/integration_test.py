@@ -18,6 +18,7 @@ Run in CI (after image build):
 import time
 import socket
 import os
+import json
 import subprocess
 import tempfile
 import urllib.request, urllib.error
@@ -282,3 +283,162 @@ def test_ssh_hostkeys_not_baked(docker_client, image_tag):
     except docker.errors.ContainerError:
         # Exit non-zero → key EXISTS → FAIL
         pytest.fail("SSH hostkey appears to be baked into image")
+
+
+def test_gallery_manager_package_installed(docker_client, image_tag):
+    """ComfyUI_GalleryManager is bundled into the image at $COMFYUI_DIR/custom_nodes/.
+
+    The package must be wired at image-build time so the next fresh pod
+    from this image has the /gallery route available on first boot, with
+    no scp step or first-boot install.
+    """
+    try:
+        docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "test -f /opt/ComfyUI/custom_nodes/ComfyUI_GalleryManager/__init__.py "
+                "&& test -f /opt/ComfyUI/custom_nodes/ComfyUI_GalleryManager/web/index.html"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(f"Gallery Manager package missing in image: {e.stderr or b''}")
+
+
+def test_gallery_manager_no_slash_redirect_present(docker_client, image_tag):
+    """The /gallery → /gallery/ redirect is wired in the bundled __init__.py.
+
+    This is the #1 reported deploy bug (SKILL.md §6.11): without the
+    explicit redirect, browsers typing /gallery (no trailing slash) hit
+    a 404. Verifying it in the IMAGE, not on a live pod, means the
+    contract is enforced regardless of how the image is deployed.
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -q 'HTTPFound.*gallery/' "
+                "/opt/ComfyUI/custom_nodes/ComfyUI_GalleryManager/__init__.py"
+            ],
+            remove=True,
+            detach=False,
+        )
+        # grep exit 0 = found = PASS
+    except docker.errors.ContainerError:
+        pytest.fail(
+            "Gallery Manager is missing the /gallery → /gallery/ redirect. "
+            "SKILL.md §6.11 documents this as the top-3 deploy bug."
+        )
+
+
+def test_gallery_api_list_responds(container, comfy_host_port):
+    """GET /gallery/api/list returns 200 JSON on a running ComfyUI instance.
+
+    This is the strongest test of the bundled-gallery integration: the
+    /gallery route must register at ComfyUI startup and serve JSON.
+    Skipped on CPU-only runners because ComfyUI's main process can't
+    stay up long enough to register the route.
+    """
+    if not has_gpu():
+        pytest.skip("No GPU on this runner — ComfyUI cannot fully start")
+    if container.status != "running":
+        pytest.skip(f"Container not running (status={container.status}); cannot hit /gallery")
+
+    url = f"http://127.0.0.1:{comfy_host_port}/gallery/api/list"
+    deadline = time.time() + 60  # ComfyUI-Manager takes 15-25s on CI
+    last_error = None
+    while time.time() < deadline:
+        try:
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("Accept", "application/json")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                # /gallery/api/list returns a JSON object with at least "files"
+                body = resp.read()
+                data = json.loads(body)
+                assert isinstance(data, dict), f"Expected JSON object, got: {body!r}"
+                assert "files" in data, f"Response missing 'files' key: {data!r}"
+                assert "folders" in data, f"Response missing 'folders' key: {data!r}"
+                return
+        except urllib.error.HTTPError as e:
+            if e.code == 503 and time.time() < deadline:
+                # ComfyUI returns 503 while still starting up
+                time.sleep(1)
+                continue
+            last_error = f"HTTP {e.code}: {e.read()!r}"
+        except Exception as e:
+            last_error = repr(e)
+        time.sleep(1)
+    pytest.fail(f"/gallery/api/list never returned 200: {last_error}")
+
+
+def test_gallery_page_redirect(container, comfy_host_port):
+    """GET /gallery (no trailing slash) → 302/308 redirect to /gallery/.
+
+    Verifies the no-slash redirect in the bundled package works end-to-end
+    on a running ComfyUI instance, not just as text in __init__.py.
+    """
+    if not has_gpu():
+        pytest.skip("No GPU on this runner — ComfyUI cannot fully start")
+    if container.status != "running":
+        pytest.skip(f"Container not running (status={container.status})")
+
+    url = f"http://127.0.0.1:{comfy_host_port}/gallery"
+    deadline = time.time() + 60
+    last_error = None
+    while time.time() < deadline:
+        try:
+            # Don't follow redirects — we want to see the 302/308 itself.
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *args, **kwargs):
+                    return None
+            opener = urllib.request.build_opener(NoRedirect)
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("Accept", "text/html")
+            try:
+                opener.open(req, timeout=5)
+                # If we got here without an HTTPError, the server replied 200
+                # to /gallery — which means the redirect is missing.
+                pytest.fail("GET /gallery returned 200; the no-slash redirect is missing")
+            except urllib.error.HTTPError as e:
+                if e.code in (301, 302, 303, 307, 308):
+                    location = e.headers.get("Location", "")
+                    assert location.endswith("/gallery/"), (
+                        f"Redirect target is {location!r}, expected /gallery/"
+                    )
+                    return  # PASS
+                last_error = f"HTTP {e.code}: {e.read()!r}"
+        except Exception as e:
+            last_error = repr(e)
+        time.sleep(1)
+    pytest.fail(f"GET /gallery never produced a redirect: {last_error}")
+
+
+def test_ffmpeg_available_in_image(docker_client, image_tag):
+    """ffmpeg is required for gallery video thumbnails and must be in the image."""
+    try:
+        docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=["ffmpeg -version | head -1"],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(f"ffmpeg not installed in image: {e.stderr or b''}")
+
+
+def test_pillow_available_in_image(docker_client, image_tag):
+    """Pillow is required by the gallery's PNG-metadata extraction."""
+    try:
+        docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=["python3 -c 'from PIL import Image; print(Image.__version__)'"],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(f"Pillow not installed in image: {e.stderr or b''}")
