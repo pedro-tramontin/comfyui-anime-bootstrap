@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap` with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.1.0](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.0.0...v1.1.0) (2026-06-05)
+
+
+### Features
+
+* **ci:** add tag_prefix input to build.yml workflow_dispatch ([#36](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/36)) ([61475e3](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/61475e3475203d696c07e934558b1503d984f7c2))
+
 ## 1.0.0 (2026-06-05)
 
 
