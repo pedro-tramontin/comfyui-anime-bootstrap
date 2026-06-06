@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap` with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.1.2](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.1.1...v1.1.2) (2026-06-06)
+
+
+### Bug Fixes
+
+* **start.sh:** mkdir -p WF_LINK parent + add SSH env propagation ([#41](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/41)) ([7553c47](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/7553c47605f5e4d1aa45b9138a0db0ec6f2fa788))
+
 ## [1.1.1](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.1.0...v1.1.1) (2026-06-06)
 
 
