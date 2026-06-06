@@ -8,6 +8,25 @@
 set -uo pipefail
 shopt -s nullglob
 
+# Compact JSON-file summary for console logs.
+# Shows the first N + last N lines (each cut to 100 chars) plus total line count
+# so you can see structure without flooding the console with a full ~12KB manifest.
+log_json_preview() {
+    local label="$1"  # e.g. "[manifest]" or "[entrypoint]"
+    local path="$2"
+    [ -f "$path" ] || { echo "$label (no file at $path)"; return; }
+    local total
+    total=$(wc -l < "$path" 2>/dev/null | tr -d ' ')
+    echo "$label first 10 / last 10 of $total lines ($path):"
+    head -10 "$path" 2>/dev/null | sed "s/.\{100\}.*/&…[trim]/" | awk -v p="$label" '{printf "  %s | %s\n", p, $0}'
+    local skip
+    skip=$(( total > 20 ? total - 10 : 0 ))
+    if [ "$skip" -gt 0 ]; then
+        tail -n +"$((skip + 1))" "$path" 2>/dev/null | head -10 | \
+            sed "s/.\{100\}.*/&…[trim]/" | awk -v p="$label" '{printf "  %s | %s\n", p, $0}'
+    fi
+}
+
 # Copy PUBLIC_KEY from env to authorized_keys (for direct public IP SSH).
 # We intentionally do NOT gate on [ ! -f authorized_keys ] here -- on
 # container restarts the file may exist with wrong perms or content
@@ -59,14 +78,10 @@ write_manifest_from_env() {
         if command -v jq >/dev/null 2>&1 && jq -e . /workspace/models.json.tmp >/dev/null 2>&1; then
             local size=$(stat -c%s /workspace/models.json.tmp 2>/dev/null || stat -f%z /workspace/models.json.tmp 2>/dev/null || echo 0)
             mv /workspace/models.json.tmp /workspace/models.json
-            # Log a compact summary (size + first line + last line) so the
+            # Log a compact summary (size + first 10 / last 10 lines) so the
             # console doesn't get flooded with the full ~12KB JSON.
-            local first_line last_line
-            first_line=$(head -1 /workspace/models.json 2>/dev/null | cut -c1-100)
-            last_line=$(tail -1 /workspace/models.json 2>/dev/null | cut -c1-100)
             echo "[entrypoint] Wrote /workspace/models.json from $src_desc (valid JSON, ${size} bytes)"
-            echo "[entrypoint]   first: ${first_line}"
-            echo "[entrypoint]   last:  ${last_line}"
+            log_json_preview "[entrypoint]" "/workspace/models.json"
             return 0
         else
             echo "[entrypoint] WARN: $src_desc failed jq validation — falling back"

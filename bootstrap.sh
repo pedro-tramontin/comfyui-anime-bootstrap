@@ -14,6 +14,25 @@
 set -uo pipefail
 shopt -s nullglob
 
+# Compact JSON-file summary for console logs.
+# Shows the first N + last N lines (each cut to 100 chars) plus total line count
+# so you can see structure without flooding the console with a full ~12KB manifest.
+log_json_preview() {
+    local label="$1"  # e.g. "[manifest]" or "[entrypoint]"
+    local path="$2"
+    [ -f "$path" ] || { echo "$label (no file at $path)"; return; }
+    local total
+    total=$(wc -l < "$path" 2>/dev/null | tr -d ' ')
+    echo "$label first 10 / last 10 of $total lines ($path):"
+    head -10 "$path" 2>/dev/null | sed "s/.\{100\}.*/&…[trim]/" | awk -v p="$label" '{printf "  %s | %s\n", p, $0}'
+    local skip
+    skip=$(( total > 20 ? total - 10 : 0 ))
+    if [ "$skip" -gt 0 ]; then
+        tail -n +"$((skip + 1))" "$path" 2>/dev/null | head -10 | \
+            sed "s/.\{100\}.*/&…[trim]/" | awk -v p="$label" '{printf "  %s | %s\n", p, $0}'
+    fi
+}
+
 echo "=== ComfyUI Anime Bootstrap ==="
 
 # ComfyUI source dir is at /opt/ComfyUI (not /workspace/ComfyUI -- see
@@ -63,12 +82,9 @@ if [ ! -f "$MANIFEST" ]; then
     echo "[manifest] No models manifest at $MANIFEST — using baked-in template"
     if [ -f /usr/local/share/models-template.json ]; then
         bk_size=$(stat -c%s /usr/local/share/models-template.json 2>/dev/null || stat -f%z /usr/local/share/models-template.json 2>/dev/null || echo 0)
-        bk_first=$(head -1 /usr/local/share/models-template.json 2>/dev/null | cut -c1-80)
-        bk_last=$(tail -1 /usr/local/share/models-template.json 2>/dev/null | cut -c1-80)
         if cp /usr/local/share/models-template.json "$MANIFEST" 2>/dev/null; then
             echo "[manifest] Copied baked-in template → $MANIFEST (${bk_size} bytes)"
-            echo "[manifest]   first: ${bk_first}"
-            echo "[manifest]   last:  ${bk_last}"
+            log_json_preview "[manifest]" "$MANIFEST"
         else
             echo "[manifest] No baked-in template either — model download step will be skipped"
         fi
@@ -76,15 +92,12 @@ if [ ! -f "$MANIFEST" ]; then
         echo "[manifest] No baked-in template either — model download step will be skipped"
     fi
 else
-    # Manifest exists — log a compact summary (size + first/last lines)
+    # Manifest exists — log a compact summary (size + first 10 / last 10 lines)
     # so the console doesn't get flooded with the full JSON for large
     # manifests (~12KB) on every container start.
     mf_size=$(stat -c%s "$MANIFEST" 2>/dev/null || stat -f%z "$MANIFEST" 2>/dev/null || echo 0)
-    mf_first=$(head -1 "$MANIFEST" 2>/dev/null | cut -c1-80)
-    mf_last=$(tail -1 "$MANIFEST" 2>/dev/null | cut -c1-80)
     echo "[manifest] Using existing $MANIFEST (${mf_size} bytes)"
-    echo "[manifest]   first: ${mf_first}"
-    echo "[manifest]   last:  ${mf_last}"
+    log_json_preview "[manifest]" "$MANIFEST"
 fi
 
 # Auth helpers
