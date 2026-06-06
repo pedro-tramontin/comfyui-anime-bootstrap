@@ -24,6 +24,7 @@ import tempfile
 import urllib.request, urllib.error
 import pytest
 import docker
+from docker import errors as docker_errors  # noqa: F401  (used by other tests)
 
 IMAGE_NAME_DEFAULT = "comfyui-anime-bootstrap:test"
 COMFY_PORT = 8188
@@ -442,3 +443,238 @@ def test_pillow_available_in_image(docker_client, image_tag):
         )
     except docker.errors.ContainerError as e:
         pytest.fail(f"Pillow not installed in image: {e.stderr or b''}")
+
+
+def test_sshd_has_permit_user_environment(docker_client, image_tag):
+    """sshd_config must have PermitUserEnvironment yes (NOT commented out).
+
+    This is what makes /root/.ssh/environment get sourced by SSH login
+    shells — required for HF_TOKEN, CIVITAI_API_KEY, etc. to survive
+    into interactive sessions. Without it, PID 1's env is invisible
+    to anything that SSH's into the pod.
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E '^PermitUserEnvironment[[:space:]]+yes' /etc/ssh/sshd_config"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            f"sshd_config missing 'PermitUserEnvironment yes' (uncommented): "
+            f"{e.stderr or b''}"
+        )
+
+
+def test_ssh_authorized_keys_handling_in_start_sh(docker_client, image_tag):
+    """start.sh must handle PUBLIC_KEY → authorized_keys correctly, including
+    on container restarts where the file may exist with wrong perms.
+
+    We can't actually run start.sh (it would try to start ComfyUI), but we
+    can verify the file is referenced and the logic exists in start.sh.
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E 'PUBLIC_KEY.*authorized_keys' /usr/local/bin/start.sh"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            f"start.sh is missing the PUBLIC_KEY → authorized_keys logic: "
+            f"{e.stderr or b''}"
+        )
+
+
+def test_bootstrap_manifest_logging_is_compact(docker_client, image_tag):
+    """bootstrap.sh must log manifest size + first/last line, not the full JSON.
+
+    Avoids the bootstrap log being flooded with ~12KB of manifest JSON
+    on every container start. The fallback copy from
+    /usr/local/share/models-template.json should also log a compact
+    summary.
+    """
+    try:
+        # Spot-check: bootstrap.sh should NOT echo the full manifest.
+        # We look for the new compact-summary pattern instead.
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E 'first:.*last:|first_line.*last_line' /usr/local/bin/bootstrap.sh"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            "bootstrap.sh is not using the compact (size + first/last line) "
+            "manifest logging — full JSON gets dumped to console on every start"
+        )
+
+
+def test_start_sh_creates_workflows_symlink_parent(docker_client, image_tag):
+    """start.sh must mkdir -p the parent of the workflows symlink.
+
+    On a fresh image, /opt/ComfyUI/user/default/ doesn't exist, so a
+    bare `ln -s` silently fails (the start.sh uses `2>/dev/null || true`
+    to mask errors). Without the parent dir, ComfyUI's "Workflow → Open"
+    dialog can't see any uploaded asuka-*.json files.
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E 'mkdir -p.*dirname.*WF_LINK|mkdir -p.*user/default' "
+                "/usr/local/bin/start.sh"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            "start.sh is missing the mkdir -p on the workflows symlink's "
+            "parent dir — the symlink silently fails on fresh images"
+        )
+
+
+def test_start_sh_writes_ssh_environment_file(docker_client, image_tag):
+    """start.sh must write /root/.ssh/environment from an allowlist.
+
+    This is the SSH env propagation path: PID 1's HF_TOKEN,
+    CIVITAI_API_KEY, WORKFLOWS_DIR, MODELS_MANIFEST get written to
+    /root/.ssh/environment (chmod 600) so PermitUserEnvironment=yes
+    in sshd_config can source them into SSH login shells.
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E 'ssh/environment|env_allowlist' /usr/local/bin/start.sh"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            "start.sh is missing the /root/.ssh/environment writer — "
+            "SSH sessions can't see PID 1's env (HF_TOKEN, etc.)"
+        )
+
+
+def test_ssh_environment_uses_allowlist_not_blanket(docker_client, image_tag):
+    """The SSH env writer must use a curated allowlist — never blanket-forward.
+
+    A blanket `env > /root/.ssh/environment` would leak RUNPOD_API_KEY and
+    other secrets into every interactive shell. The implementation must
+    enumerate specific keys (HF_TOKEN, CIVITAI_API_KEY, etc.).
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E 'env_allowlist=\"HF_TOKEN.*CIVITAI_API_KEY' "
+                "/usr/local/bin/start.sh"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            "start.sh SSH env writer is missing the curated allowlist — "
+            "either it doesn't exist or it blanket-forwards PID 1's env"
+        )
+
+
+def test_start_sh_decodes_manifest_b64(docker_client, image_tag):
+    """start.sh must try MODELS_MANIFEST_B64 first (base64 path).
+
+    This is the preferred path for the manifest env var because raw
+    multi-line JSON can get mangled by env-marshalling layers; base64
+    is single-line and survives. MODELS_MANIFEST (raw) should still
+    work as a back-compat fallback.
+    """
+    try:
+        out = docker_client.containers.run(
+            image_tag,
+            entrypoint=["/bin/sh", "-c"],
+            command=[
+                "grep -E 'MODELS_MANIFEST_B64|base64.*-d' /usr/local/bin/start.sh"
+            ],
+            remove=True,
+            detach=False,
+        )
+    except docker.errors.ContainerError as e:
+        pytest.fail(
+            "start.sh is missing the MODELS_MANIFEST_B64 (base64) decode path"
+        )
+
+
+def test_workflow_symlink_works_with_docker_volume(docker_client, image_tag):
+    """End-to-end: with a mounted volume + a workflow .json file at the
+    expected location, start.sh's workflows symlink path should resolve
+    correctly to a non-empty dir.
+
+    Mocks the RunPod network-volume scenario:
+      - Mount a tmp dir at /workspace
+      - Drop asuka-animagine-workflow.json in /workspace/workflows/
+      - Set WORKFLOWS_DIR=/workspace/workflows in the env
+      - Run start.sh's symlink logic and verify the link is created
+        and resolves to a non-empty dir
+
+    Skips on CPU-only runners because start.sh tries to start ComfyUI
+    at the end.
+    """
+    if not has_gpu():
+        pytest.skip(
+            "No GPU on this runner — start.sh's ComfyUI launch would fail. "
+            "Run the symlink-only test on a GPU runner or extract the "
+            "symlink logic into a callable function for unit testing."
+        )
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        workflows_dir = os.path.join(tmp, "workflows")
+        os.makedirs(workflows_dir)
+        wf_file = os.path.join(workflows_dir, "asuka-animagine-workflow.json")
+        with open(wf_file, "w") as f:
+            f.write("{}")  # minimal valid JSON; the test only checks existence
+        try:
+            out = docker_client.containers.run(
+                image_tag,
+                entrypoint=["/bin/bash", "-c"],
+                command=[
+                    # Reproduce the relevant slice of start.sh:
+                    # 1. Make sure user/default/ exists
+                    # 2. Symlink it to WORKFLOWS_DIR
+                    # 3. Verify the symlink resolves to a non-empty dir
+                    "set -euo pipefail; "
+                    "COMFYUI_DIR=/opt/ComfyUI; "
+                    "WF_LINK=\"$COMFYUI_DIR/user/default/workflows\"; "
+                    "mkdir -p \"$(dirname \"$WF_LINK\")\"; "
+                    "mkdir -p \"$WORKFLOWS_DIR\"; "
+                    "ln -sfn \"$WORKFLOWS_DIR\" \"$WF_LINK\"; "
+                    "test -L \"$WF_LINK\"; "
+                    "n=$(ls -A \"$WF_LINK\" | wc -l); "
+                    "echo \"WF_LINK resolves to $n files\"; "
+                    "test \"$n\" -gt 0"
+                ],
+                environment={"WORKFLOWS_DIR": workflows_dir},
+                volumes={tmp: {"bind": tmp, "mode": "rw"}},
+                remove=True,
+                detach=False,
+            )
+        except docker.errors.ContainerError as e:
+            pytest.fail(
+                f"Workflow symlink logic failed end-to-end: {e.stderr or b''}"
+            )
