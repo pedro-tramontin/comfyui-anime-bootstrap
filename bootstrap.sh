@@ -39,7 +39,12 @@ echo "=== ComfyUI Anime Bootstrap ==="
 # the comment in the Dockerfile for the volume-shadowing rationale).
 COMFYUI_DIR="${COMFYUI_DIR:-/opt/ComfyUI}"
 MODELS_ROOT="${MODELS_ROOT:-/workspace/models}"
-MANIFEST="${MODELS_MANIFEST:-/workspace/models.json}"
+# IMPORTANT: $MODELS_MANIFEST is the JSON CONTENT of the manifest (set by
+# start.sh's entrypoint from the MODELS_MANIFEST_B64 / MODELS_MANIFEST env
+# vars), NOT a file path. The entrypoint already wrote the content to
+# /workspace/models.json — bootstrap should always read from the file path,
+# never from the env var. See PR #41 for the start.sh write logic.
+MANIFEST="${MANIFEST_PATH:-/workspace/models.json}"
 
 # Always create model dirs (no-op if they exist)
 mkdir -p "$MODELS_ROOT/checkpoints" "$MODELS_ROOT/loras" \
