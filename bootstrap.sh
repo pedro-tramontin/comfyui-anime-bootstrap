@@ -61,8 +61,30 @@ fi
 # If no manifest exists on the volume, copy the baked-in template
 if [ ! -f "$MANIFEST" ]; then
     echo "[manifest] No models manifest at $MANIFEST — using baked-in template"
-    cp /usr/local/share/models-template.json "$MANIFEST" 2>/dev/null || \
+    if [ -f /usr/local/share/models-template.json ]; then
+        bk_size=$(stat -c%s /usr/local/share/models-template.json 2>/dev/null || stat -f%z /usr/local/share/models-template.json 2>/dev/null || echo 0)
+        bk_first=$(head -1 /usr/local/share/models-template.json 2>/dev/null | cut -c1-80)
+        bk_last=$(tail -1 /usr/local/share/models-template.json 2>/dev/null | cut -c1-80)
+        if cp /usr/local/share/models-template.json "$MANIFEST" 2>/dev/null; then
+            echo "[manifest] Copied baked-in template → $MANIFEST (${bk_size} bytes)"
+            echo "[manifest]   first: ${bk_first}"
+            echo "[manifest]   last:  ${bk_last}"
+        else
+            echo "[manifest] No baked-in template either — model download step will be skipped"
+        fi
+    else
         echo "[manifest] No baked-in template either — model download step will be skipped"
+    fi
+else
+    # Manifest exists — log a compact summary (size + first/last lines)
+    # so the console doesn't get flooded with the full JSON for large
+    # manifests (~12KB) on every container start.
+    mf_size=$(stat -c%s "$MANIFEST" 2>/dev/null || stat -f%z "$MANIFEST" 2>/dev/null || echo 0)
+    mf_first=$(head -1 "$MANIFEST" 2>/dev/null | cut -c1-80)
+    mf_last=$(tail -1 "$MANIFEST" 2>/dev/null | cut -c1-80)
+    echo "[manifest] Using existing $MANIFEST (${mf_size} bytes)"
+    echo "[manifest]   first: ${mf_first}"
+    echo "[manifest]   last:  ${mf_last}"
 fi
 
 # Auth helpers

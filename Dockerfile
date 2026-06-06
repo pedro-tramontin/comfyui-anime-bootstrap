@@ -109,9 +109,15 @@ COPY start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
 
 # SSH: generate hostkeys at runtime, not build time
+# Also enable PermitUserEnvironment so start.sh's /root/.ssh/environment
+# file is sourced by SSH login shells. This is what makes PID 1's env
+# (HF_TOKEN, CIVITAI_API_KEY, etc.) available to interactive shells,
+# since sshd's default AcceptEnv is empty.
 RUN mkdir -p /var/run/sshd /root/.ssh \
     && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config \
+    && { grep -q '^PermitUserEnvironment' /etc/ssh/sshd_config \
+        || echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config; } \
     && rm -f /etc/ssh/ssh_host_*
 
 EXPOSE 22 8188

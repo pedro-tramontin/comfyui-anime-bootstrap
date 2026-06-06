@@ -33,28 +33,74 @@ ssh-keygen -A 2>/dev/null || echo "[ssh] hostkey generation failed (non-fatal)"
 /usr/sbin/sshd 2>/dev/null || echo "[ssh] sshd failed to start (non-fatal)"
 
 # Custom models.json from env (BEFORE bootstrap reads /workspace/models.json).
-# If the orchestrator (e.g. runpod_cheapest_loop.py) passes a MODELS_MANIFEST
-# env var containing a JSON manifest, write it to /workspace/models.json so
-# bootstrap uses our list instead of the baked-in fallback. This avoids the
-# need for any pre-staging step or scp — the env var is the single source
-# of truth for the manifest on a fresh volume.
+# If the orchestrator (e.g. runpod_cheapest_loop.py) passes a manifest
+# containing a JSON string, write it to /workspace/models.json so
+# bootstrap uses our list instead of the baked-in fallback. This avoids
+# the need for any pre-staging step or scp — the env var is the single
+# source of truth for the manifest on a fresh volume.
 #
-# Failures here are non-fatal: if jq is missing or the JSON is malformed,
-# bootstrap will fall back to /usr/local/share/models-template.json.
-if [ -n "${MODELS_MANIFEST:-}" ]; then
-    echo "[entrypoint] MODELS_MANIFEST env var set (${#MODELS_MANIFEST} bytes) — writing /workspace/models.json"
-    if printf '%s' "$MODELS_MANIFEST" > /workspace/models.json.tmp 2>/dev/null; then
+# Two env-var keys are supported, in priority order:
+#   1. MODELS_MANIFEST_B64 — base64-encoded JSON. This is the preferred
+#      path because Linux env vars cannot contain raw newlines (the
+#      RunPod container agent truncates at the first \n, silently
+#      corrupting the JSON). Base64 is single-line and survives the
+#      transport intact. The launcher writes this.
+#   2. MODELS_MANIFEST — raw JSON. Kept for back-compat with any older
+#      orchestrator that hasn't been updated. Often truncated on real
+#      RunPod deploys; we still try it as a best-effort fallback.
+#
+# If neither env var is set (or both fail jq validation), bootstrap will
+# fall back to /usr/local/share/models-template.json (baked into the
+# image at build time).
+write_manifest_from_env() {
+    local src_desc="$1"  # human-readable label for log lines
+    local raw="$2"       # the manifest content (decoded bytes if B64, raw text if not)
+    if printf '%s' "$raw" > /workspace/models.json.tmp 2>/dev/null; then
         if command -v jq >/dev/null 2>&1 && jq -e . /workspace/models.json.tmp >/dev/null 2>&1; then
+            local size=$(stat -c%s /workspace/models.json.tmp 2>/dev/null || stat -f%z /workspace/models.json.tmp 2>/dev/null || echo 0)
             mv /workspace/models.json.tmp /workspace/models.json
-            echo "[entrypoint] Wrote /workspace/models.json (valid JSON)"
+            # Log a compact summary (size + first line + last line) so the
+            # console doesn't get flooded with the full ~12KB JSON.
+            local first_line last_line
+            first_line=$(head -1 /workspace/models.json 2>/dev/null | cut -c1-100)
+            last_line=$(tail -1 /workspace/models.json 2>/dev/null | cut -c1-100)
+            echo "[entrypoint] Wrote /workspace/models.json from $src_desc (valid JSON, ${size} bytes)"
+            echo "[entrypoint]   first: ${first_line}"
+            echo "[entrypoint]   last:  ${last_line}"
+            return 0
         else
-            echo "[entrypoint] WARN: MODELS_MANIFEST failed jq validation — falling back to baked-in template"
+            echo "[entrypoint] WARN: $src_desc failed jq validation — falling back"
             rm -f /workspace/models.json.tmp
+            return 1
         fi
     else
-        echo "[entrypoint] WARN: could not write /workspace/models.json.tmp — falling back to baked-in template"
+        echo "[entrypoint] WARN: could not write /workspace/models.json.tmp from $src_desc — falling back"
+        return 1
+    fi
+}
+
+# Path 1: base64-encoded manifest (preferred — survives newline mangling)
+if [ -n "${MODELS_MANIFEST_B64:-}" ]; then
+    echo "[entrypoint] MODELS_MANIFEST_B64 env var set (${#MODELS_MANIFEST_B64} b64-chars) — decoding"
+    if command -v base64 >/dev/null 2>&1; then
+        decoded=$(printf '%s' "$MODELS_MANIFEST_B64" | base64 -d 2>/dev/null) || decoded=""
+        if [ -n "$decoded" ]; then
+            write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded" && goto_manifest_done=true
+        else
+            echo "[entrypoint] WARN: base64 decode failed — falling back to MODELS_MANIFEST"
+        fi
+    else
+        echo "[entrypoint] WARN: base64 command not available — falling back to MODELS_MANIFEST"
     fi
 fi
+
+# Path 2: raw manifest (back-compat — often truncated on RunPod)
+if [ "${goto_manifest_done:-}" != "true" ] && [ -n "${MODELS_MANIFEST:-}" ]; then
+    echo "[entrypoint] MODELS_MANIFEST env var set (${#MODELS_MANIFEST} bytes) — writing /workspace/models.json"
+    write_manifest_from_env "MODELS_MANIFEST" "$MODELS_MANIFEST" || true
+fi
+
+unset decoded goto_manifest_done
 
 # Run bootstrap — failures here MUST NOT block ComfyUI startup.
 # A download or git pull issue should be logged and the user can fix it manually.
@@ -98,6 +144,11 @@ fi
 #     on container restarts, so re-running the entrypoint doesn't break)
 if [ -n "${WORKFLOWS_DIR:-}" ]; then
     WF_LINK="$COMFYUI_DIR/user/default/workflows"
+    # Ensure the symlink's parent dir exists. Without this, `ln -s` on a
+    # fresh image fails silently (with 2>/dev/null || true above) and
+    # ComfyUI's "Workflow → Open" dialog can't find any asuka-*.json files.
+    # On first-launch images COMFYUI_DIR/user/default/ doesn't exist.
+    mkdir -p "$(dirname "$WF_LINK")" 2>/dev/null || true
     if [ -L "$WF_LINK" ] || [ -e "$WF_LINK" ]; then
         # If it's a real (non-empty) dir, leave it. If it's an empty default
         # dir (the put_checkpoints_here style), replace with symlink.
@@ -112,6 +163,44 @@ if [ -n "${WORKFLOWS_DIR:-}" ]; then
         mkdir -p "$WORKFLOWS_DIR" 2>/dev/null || true
         ln -s "$WORKFLOWS_DIR" "$WF_LINK"
         echo "[entrypoint] Symlinked $WF_LINK → $WORKFLOWS_DIR"
+    fi
+    # Sanity check — verify the symlink resolves to a non-empty dir
+    if [ -L "$WF_LINK" ]; then
+        wf_count=$(ls -A "$WF_LINK" 2>/dev/null | wc -l)
+        echo "[entrypoint] Workflows dir contains $wf_count file(s)"
+    fi
+fi
+
+# SSH env propagation: write /root/.ssh/environment from a curated list of
+# env vars so they survive into SSH login shells. By default sshd's
+# AcceptEnv is empty (or LANG LC_*), so PID 1's env is NOT inherited by
+# SSH sessions. The orchestrator (runpod_cheapest_loop.py) needs HF_TOKEN
+# and CIVITAI_API_KEY available to whatever shell opens an SSH session
+# into the pod (e.g. for `huggingface-cli`, `aria2c --header`, or just
+# manual debugging). This requires PermitUserEnvironment yes in
+# sshd_config (see Dockerfile) and a 600-perm /root/.ssh/environment file.
+#
+# We only forward a curated allowlist — never blanket-forward PID 1's env,
+# which can include RUNPOD_API_KEY and other secrets that should NOT leak
+# into interactive shells.
+if [ -d /root/.ssh ]; then
+    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY WORKFLOWS_DIR MODELS_MANIFEST MODELS_MANIFEST_B64"
+    : > /root/.ssh/environment
+    found_any=0
+    for k in $env_allowlist; do
+        v="${!k:-}"
+        if [ -n "$v" ]; then
+            # `env` format: KEY=VALUE per line, no quoting (sshd parses it)
+            # Strip newlines from the value to keep it on one line.
+            v_oneline=$(printf '%s' "$v" | tr '\n' ' ')
+            echo "${k}=${v_oneline}" >> /root/.ssh/environment
+            found_any=1
+        fi
+    done
+    if [ "$found_any" = "1" ]; then
+        chmod 600 /root/.ssh/environment
+        n=$(wc -l < /root/.ssh/environment)
+        echo "[entrypoint] Wrote /root/.ssh/environment ($n allowlisted env var(s) for SSH login shells)"
     fi
 fi
 
