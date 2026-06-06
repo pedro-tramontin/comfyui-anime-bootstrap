@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap` with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.1.1](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.1.0...v1.1.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* **bootstrap:** safe jq query over manifest + auth-token URL interpolation ([#39](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/39)) ([029c9d1](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/029c9d1b4f22f0ecac77530e73cd745838d9ef23))
+
 ## [1.1.0](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.0.0...v1.1.0) (2026-06-05)
 
 
