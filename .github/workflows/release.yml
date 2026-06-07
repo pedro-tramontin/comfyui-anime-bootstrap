@@ -6,20 +6,19 @@ on:
       - 'v*.*.*'
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_REPO: ${{ github.event.repository.name }}
   CUDA_VERSION: '13.0'
   PYTORCH_VERSION: '2.12.0'
   DRIVER_FLOOR: '12080'
-  # Docker Hub mirror — read from secret so the username isn't hardcoded.
+  # Docker Hub is the sole registry. The username and project name are
+  # overridable via secrets so the workflow isn't tied to one account.
   # Required secrets (set in repo Settings → Secrets):
   #   DOCKER_USERNAME          — Docker Hub account
   #   DOCKERHUB_TOKEN          — Docker Hub access token (Read/Write/Delete on the target repo)
-  #   DOCKERHUB_PROJECT_NAME   — Docker Hub repo name (defaults to "${IMAGE_NAME##*/}" if empty)
+  #   DOCKERHUB_PROJECT_NAME   — Docker Hub repo name (defaults to "${IMAGE_REPO}" if empty)
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   DOCKERHUB_PROJECT_NAME: ${{ secrets.DOCKERHUB_PROJECT_NAME }}
-  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
 jobs:
   release:
@@ -27,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
 
     steps:
       - name: Checkout
@@ -44,66 +42,40 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Log in to Docker Hub
-        if: env.PUSH_TO_DOCKERHUB == 'true'
+        if: env.DOCKER_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
         uses: docker/login-action@v4
         with:
-          registry: docker.io
           username: ${{ env.DOCKER_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Build and push release image
         run: |
           set -euo pipefail
-          VERSION="${{ steps.cfg.outputs.version }}"
-          REPO="${IMAGE_NAME##*/}"  # bare repo name (used when DOCKERHUB_PROJECT_NAME is empty)
-          DOCKERHUB_REPO="${DOCKERHUB_PROJECT_NAME:-${REPO}}"
-
-          # GHCR
-          GHCR_TAG="${REGISTRY}/${IMAGE_NAME}:v${VERSION}"
-          GHCR_LATEST="${REGISTRY}/${IMAGE_NAME}:latest"
-
-          # Docker Hub mirror (only if secrets are set)
-          DOCKERHUB_TAG=""
-          DOCKERHUB_LATEST=""
-          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
-            DOCKERHUB_TAG="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}:v${VERSION}"
-            DOCKERHUB_LATEST="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}:latest"
+          if [ -z "${DOCKER_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
+            echo "::error::DOCKER_USERNAME and DOCKERHUB_TOKEN secrets must be set to publish a release."
+            exit 1
           fi
+
+          VERSION="${{ steps.cfg.outputs.version }}"
+          DOCKERHUB_REPO="${DOCKERHUB_PROJECT_NAME:-${IMAGE_REPO}}"
+          IMAGE="${DOCKER_USERNAME}/${DOCKERHUB_REPO}"
+          TAG="${IMAGE}:v${VERSION}"
+          LATEST="${IMAGE}:latest"
 
           docker build \
             --build-arg CUDA_VERSION="${CUDA_VERSION}" \
             --build-arg PYTORCH_VERSION="${PYTORCH_VERSION}" \
             --build-arg DRIVER_FLOOR="${DRIVER_FLOOR}" \
-            -t "${GHCR_TAG}" \
+            -t "${TAG}" \
             .
 
-          docker push "${GHCR_TAG}"
-          docker tag "${GHCR_TAG}" "${GHCR_LATEST}"
-          docker push "${GHCR_LATEST}"
-
-          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
-            docker tag "${GHCR_TAG}" "${DOCKERHUB_TAG}"
-            docker push "${DOCKERHUB_TAG}"
-            docker tag "${GHCR_TAG}" "${DOCKERHUB_LATEST}"
-            docker push "${DOCKERHUB_LATEST}"
-          else
-            echo "::notice::DOCKER_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
-          fi
+          docker push "${TAG}"
+          docker tag "${TAG}" "${LATEST}"
+          docker push "${LATEST}"
 
           echo ""
           echo "=== Release complete ==="
           echo "Published v${VERSION}"
-          echo "  - ${GHCR_TAG}"
-          echo "  - ${GHCR_LATEST}"
-          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
-            echo "  - ${DOCKERHUB_TAG}"
-            echo "  - ${DOCKERHUB_LATEST}"
-          fi
+          echo "  - ${TAG}"
+          echo "  - ${LATEST}"

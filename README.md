@@ -43,25 +43,24 @@ The image is built from one `pytorch/pytorch` base per run. Each image carries O
 
 > **Older bases:** to publish a variant for an older driver, re-trigger the GitHub Actions workflow manually (Actions → Build and Push → Run workflow) and change the inputs. The image gets tagged `cuda<X>-pytorch<Y>` and (optionally) `:latest`.
 
-### Registries
+### Registry
 
-Each release is pushed to **both** registries (Docker Hub mirror is auto-skipped if the `DOCKER_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are not set):
+The image is published to **Docker Hub** as `<DOCKER_USERNAME>/<DOCKERHUB_PROJECT_NAME or "comfyui-anime-bootstrap">:<tag>`.
 
-- `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:<tag>`
-- `docker.io/<DOCKER_USERNAME>/<DOCKERHUB_PROJECT_NAME or "comfyui-anime-bootstrap">:<tag>`
-
-Use the Docker Hub tag on providers that can't reach `ghcr.io` (some Vast.ai hosts). Same digest either way.
+> We publish only to Docker Hub (not GHCR) because Docker Hub has better reachability from Vast.ai hosts and other GPU providers; many of them can't pull from `ghcr.io` reliably.
 
 **Programmatic selection:**
 
 ```bash
 # List all available tags
-docker manifest inspect ghcr.io/pedro-tramontin/comfyui-anime-bootstrap | jq -r '.manifests[].digest'
+docker manifest inspect <dockerhub-image> | jq -r '.manifests[].digest'
+# e.g.
+docker manifest inspect pedrotramn/comfyui-anime-bootstrap | jq -r '.manifests[].digest'
 
 # Inspect a tag's driver floor
-docker pull ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+docker pull pedrotramn/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 docker inspect --format '{{ index .Config.Labels "com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor" }}' \
-  ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+  pedrotramn/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 # → 12080
 ```
 
@@ -103,7 +102,7 @@ Or just point the orchestrator at the skill's `models.json` and skip this step e
 docker run -it --gpus all \
   -e HF_TOKEN=***  -e MODELS_MANIFEST=/workspace/models.json \
   -v /path/to/models:/workspace/models \
-  ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:latest
+  pedrotramn/comfyui-anime-bootstrap:latest
 ```
 
 ### 3. Wait for bootstrap
