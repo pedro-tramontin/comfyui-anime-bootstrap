@@ -126,6 +126,68 @@ echo "[entrypoint] Running bootstrap (failures will be logged but not block)..."
     echo "[entrypoint] Fix model issues manually with: huggingface-cli download <repo> or wget"
 }
 
+# Link a ComfyUI top-level dir to an external volume path, idempotently.
+# Idempotency: if the link already exists, leave it alone — re-running
+# the entrypoint on container restart must not clobber or migrate twice.
+# Migration: if the link target is a real (non-symlink) dir with content,
+# move the contents to the external path, then atomically replace the
+# real dir with a symlink. This is the upgrade path for existing deploys
+# that pre-date the EXTERNAL_BASE_FOLDER convention.
+#
+# Args:
+#   $1 — human label, e.g. "workflows" (for log lines)
+#   $2 — the ComfyUI dir we want to symlink (e.g. $COMFYUI_DIR/output)
+#   $3 — the external target path (e.g. /workspace/output)
+#   $4 — "yes" if we should migrate existing contents (output yes,
+#        workflows no — workflows are always owned by the orchestrator
+#        and any local "put_*_here" placeholder is junk we don't want
+#        to copy to the volume)
+link_to_external_volume() {
+    local label="$1"
+    local link_path="$2"
+    local target_path="$3"
+    local migrate_contents="${4:-no}"
+
+    mkdir -p "$target_path" 2>/dev/null || true
+    # Ensure the symlink's parent dir exists. Without this, `ln -s` on a
+    # fresh image fails silently (e.g. /opt/ComfyUI/user/default/ may
+    # not exist on first launch).
+    mkdir -p "$(dirname "$link_path")" 2>/dev/null || true
+
+    if [ -L "$link_path" ] || [ -e "$link_path" ]; then
+        if [ -d "$link_path" ] && [ ! -L "$link_path" ]; then
+            # Real (non-symlink) dir: optionally migrate contents to the
+            # external path, then atomically replace the dir with a
+            # symlink. We move files individually (not `mv $link_path/*
+            # $target_path/` after rmdir) because the dir often contains
+            # placeholder files like "_output_images_will_be_put_here" or
+            # partial subdirs we want to keep.
+            local existing
+            existing=$(ls -A "$link_path" 2>/dev/null | wc -l)
+            if [ "$existing" -gt 0 ] && [ "$migrate_contents" = "yes" ]; then
+                echo "[entrypoint] Migrating $existing existing $label file(s) from $link_path → $target_path"
+                (cd "$link_path" && find . -mindepth 1 -maxdepth 1 \
+                    -exec sh -c '[ ! -e "$0/$1" ] && mv "$1" "$0/"' "$target_path" {} \;)
+            fi
+            rmdir "$link_path" 2>/dev/null || rm -rf "$link_path"
+            ln -s "$target_path" "$link_path"
+            echo "[entrypoint] Replaced real $label dir with symlink → $target_path"
+        else
+            echo "[entrypoint] $label dir $link_path is already a symlink, leaving as-is"
+        fi
+    else
+        ln -s "$target_path" "$link_path"
+        echo "[entrypoint] Symlinked $link_path → $target_path"
+    fi
+
+    # Sanity check — verify the symlink resolves to a non-empty dir
+    if [ -L "$link_path" ]; then
+        local count
+        count=$(ls -A "$link_path" 2>/dev/null | wc -l)
+        echo "[entrypoint] $label dir contains $count file(s)"
+    fi
+}
+
 # Sanity-check that ComfyUI is actually installed
 if [ ! -f "$COMFYUI_DIR/main.py" ]; then
     echo "[entrypoint] FATAL: $COMFYUI_DIR/main.py not found — ComfyUI not installed"
@@ -141,111 +203,62 @@ if [ ! -d "$WF_TPL_DIR" ]; then
     mkdir -p "$WF_TPL_DIR"
 fi
 
-# Custom workflows dir from env. If WORKFLOWS_DIR is set (typically a path on
-# the network volume, e.g. /workspace/workflows), symlink ComfyUI's default
-# workflows dir to it. Workflows uploaded to that volume path appear
-# instantly in ComfyUI's "Workflow → Load" menu.
+# Link the three ComfyUI top-level dirs (models, output, workflows) to an
+# external volume when EXTERNAL_BASE_FOLDER is set. EXTERNAL_BASE_FOLDER is
+# the canonical knob — one env var, three symlinks, all of them on the
+# same persistent volume.
 #
-# We do NOT bake any workflows into the image — the orchestrator owns the
-# canonical templates at ~/.hermes/comfyui/templates/ on the host and pushes
-# them to the volume. This keeps the image small and lets workflows evolve
-# independently of image rebuilds.
+# Per-dir overrides (MODELS_DIR, OUTPUT_DIR, WORKFLOWS_DIR) take precedence
+# over the derived values for advanced cases (e.g. a user wants models on
+# one volume and output on another). They are independent: any subset
+# may be set, and unset vars fall through to the EXTERNAL_BASE_FOLDER
+# derivation.
 #
-# Behavior:
-#   - WORKFLOWS_DIR unset → no symlink; ComfyUI uses its empty default dir
-#     (workflows must be uploaded per-launch via scp, or none)
-#   - WORKFLOWS_DIR set, symlink doesn't exist → create it
-#   - WORKFLOWS_DIR set, symlink already exists → leave it alone (idempotent
-#     on container restarts, so re-running the entrypoint doesn't break)
-if [ -n "${WORKFLOWS_DIR:-}" ]; then
-    WF_LINK="$COMFYUI_DIR/user/default/workflows"
-    # Ensure the symlink's parent dir exists. Without this, `ln -s` on a
-    # fresh image fails silently (with 2>/dev/null || true above) and
-    # ComfyUI's "Workflow → Open" dialog can't find any asuka-*.json files.
-    # On first-launch images COMFYUI_DIR/user/default/ doesn't exist.
-    mkdir -p "$(dirname "$WF_LINK")" 2>/dev/null || true
-    if [ -L "$WF_LINK" ] || [ -e "$WF_LINK" ]; then
-        # If it's a real (non-empty) dir, leave it. If it's an empty default
-        # dir (the put_checkpoints_here style), replace with symlink.
-        if [ -d "$WF_LINK" ] && [ -z "$(ls -A "$WF_LINK" 2>/dev/null)" ]; then
-            rmdir "$WF_LINK" 2>/dev/null || rm -rf "$WF_LINK"
-            ln -s "$WORKFLOWS_DIR" "$WF_LINK"
-            echo "[entrypoint] Replaced empty default workflows dir with symlink → $WORKFLOWS_DIR"
-        else
-            echo "[entrypoint] Workflows dir $WF_LINK already exists, leaving as-is"
-        fi
-    else
-        mkdir -p "$WORKFLOWS_DIR" 2>/dev/null || true
-        ln -s "$WORKFLOWS_DIR" "$WF_LINK"
-        echo "[entrypoint] Symlinked $WF_LINK → $WORKFLOWS_DIR"
-    fi
-    # Sanity check — verify the symlink resolves to a non-empty dir
-    if [ -L "$WF_LINK" ]; then
-        wf_count=$(ls -A "$WF_LINK" 2>/dev/null | wc -l)
-        echo "[entrypoint] Workflows dir contains $wf_count file(s)"
-    fi
-fi
-
-# Custom output dir from env. If OUTPUT_DIR is set (typically a path on the
-# network volume, e.g. /workspace/output), symlink ComfyUI's default
-# $COMFYUI_DIR/output to it. Generated images, the GalleryManager's
-# .metadata.jsonl sidecar, and .thumbs/ all then land on the volume and
-# survive pod termination.
+# Why a symlink and not extra_model_paths.yaml? extra_model_paths.yaml
+# only handles model TYPES (checkpoints, loras, vae, ...), not the
+# top-level output/input/temp/user dirs. Those are hardcoded in
+# folder_paths.py to `os.path.join(base_path, "output")` where base_path
+# defaults to $COMFYUI_DIR. So a symlink at the FS level is the only
+# mechanism that works uniformly for ALL three dirs (models, output,
+# workflows), avoids the "no models visible despite successful downloads"
+# pitfall the YAML was a workaround for, and is OS-level so a broken
+# mount fails loudly instead of silently.
 #
-# We do NOT use extra_model_paths.yaml for this — that file only handles
-# model types (checkpoints, loras, vae, ...), not the output/input/temp/
-# user dirs. Those are hardcoded in folder_paths.py to $base_path/output,
-# where $base_path defaults to $COMFYUI_DIR. So a symlink on the FS is the
-# only way to redirect output to a network volume.
-#
-# We also do NOT bake any outputs into the image — the orchestrator owns
-# the canonical gallery on the host and pushes new images to the volume.
-# This keeps the image small and lets outputs accumulate independently of
-# image rebuilds.
-#
-# Behavior mirrors WORKFLOWS_DIR above:
-#   - OUTPUT_DIR unset → no symlink; ComfyUI writes to its default
-#     $COMFYUI_DIR/output on the container disk (lost on pod termination)
-#   - OUTPUT_DIR set, symlink doesn't exist → create it
-#   - OUTPUT_DIR set, symlink already exists → leave it alone (idempotent
-#     on container restarts, so re-running the entrypoint doesn't break)
-#   - OUTPUT_DIR set, $COMFYUI_DIR/output exists as a non-empty real dir
-#     (existing generated images) → migrate the contents to $OUTPUT_DIR,
-#     then replace the dir with a symlink
-if [ -n "${OUTPUT_DIR:-}" ]; then
-    OUT_LINK="$COMFYUI_DIR/output"
-    mkdir -p "$OUTPUT_DIR" 2>/dev/null || true
-    if [ -L "$OUT_LINK" ] || [ -e "$OUT_LINK" ]; then
-        if [ -d "$OUT_LINK" ] && [ ! -L "$OUT_LINK" ]; then
-            # Real (non-symlink) dir: migrate contents to OUTPUT_DIR, then
-            # atomically replace the dir with a symlink. We move files
-            # individually (not `mv $OUT_LINK/* $OUTPUT_DIR/` after rmdir)
-            # because the dir often contains a "_output_images_will_be_put_here"
-            # placeholder or partial subdirs we want to keep.
-            existing=$(ls -A "$OUT_LINK" 2>/dev/null | wc -l)
-            if [ "$existing" -gt 0 ]; then
-                echo "[entrypoint] Migrating $existing existing output file(s) from $OUT_LINK → $OUTPUT_DIR"
-                # Use find -mindepth 1 to move both top-level files and
-                # subdirs (e.g. .thumbs/, subfolders). Skip if the target
-                # already has a same-named file (don't clobber).
-                (cd "$OUT_LINK" && find . -mindepth 1 -maxdepth 1 \
-                    -exec sh -c '[ ! -e "$0/$1" ] && mv "$1" "$0/"' "$OUTPUT_DIR" {} \;)
-            fi
-            rmdir "$OUT_LINK" 2>/dev/null || rm -rf "$OUT_LINK"
-            ln -s "$OUTPUT_DIR" "$OUT_LINK"
-            echo "[entrypoint] Replaced real output dir with symlink → $OUTPUT_DIR"
-        else
-            echo "[entrypoint] Output dir $OUT_LINK is already a symlink, leaving as-is"
-        fi
-    else
-        ln -s "$OUTPUT_DIR" "$OUT_LINK"
-        echo "[entrypoint] Symlinked $OUT_LINK → $OUTPUT_DIR"
-    fi
-    # Sanity check — verify the symlink resolves
-    if [ -L "$OUT_LINK" ]; then
-        out_count=$(ls -A "$OUT_LINK" 2>/dev/null | wc -l)
-        echo "[entrypoint] Output dir contains $out_count file(s)"
-    fi
+# We do NOT bake models, output, or workflows into the image. The
+# orchestrator owns the canonical templates at ~/.hermes/comfyui/
+# on the host and pushes them to the volume. This keeps the image
+# small and lets outputs accumulate independently of image rebuilds.
+if [ -n "${EXTERNAL_BASE_FOLDER:-}" ]; then
+    echo "[entrypoint] EXTERNAL_BASE_FOLDER=$EXTERNAL_BASE_FOLDER — linking models/output/workflows to volume"
+    # MODELS_DIR: migrate contents because the image bakes 28 placeholder
+    # subdirs (checkpoints/, loras/, ...) into $COMFYUI_DIR/models. We
+    # DO NOT want those to land on the volume, so don't migrate by
+    # default. Override with MODELS_DIR_MIGRATE=yes if you really need
+    # to keep local models.
+    link_to_external_volume "models" \
+        "$COMFYUI_DIR/models" \
+        "${MODELS_DIR:-$EXTERNAL_BASE_FOLDER/models}" \
+        "${MODELS_DIR_MIGRATE:-no}"
+    # OUTPUT_DIR: migrate — generated images on the container disk
+    # should move to the volume.
+    link_to_external_volume "output" \
+        "$COMFYUI_DIR/output" \
+        "${OUTPUT_DIR:-$EXTERNAL_BASE_FOLDER/output}" \
+        "yes"
+    # WORKFLOWS_DIR: don't migrate. Workflows are always owned by the
+    # orchestrator; any local "put_*_here" placeholder is junk.
+    link_to_external_volume "workflows" \
+        "$COMFYUI_DIR/user/default/workflows" \
+        "${WORKFLOWS_DIR:-$EXTERNAL_BASE_FOLDER/workflows}" \
+        "no"
+elif [ -n "${WORKFLOWS_DIR:-}" ] || [ -n "${OUTPUT_DIR:-}" ] || [ -n "${MODELS_DIR:-}" ]; then
+    # Backward-compat: allow the per-dir vars to work on their own
+    # (e.g. an older orchestrator that hasn't been updated to set
+    # EXTERNAL_BASE_FOLDER). One or more of the three may be set.
+    echo "[entrypoint] Per-dir override detected (no EXTERNAL_BASE_FOLDER) — linking only the specified dir(s)"
+    [ -n "${MODELS_DIR:-}" ] && link_to_external_volume "models" "$COMFYUI_DIR/models" "$MODELS_DIR" "${MODELS_DIR_MIGRATE:-no}"
+    [ -n "${OUTPUT_DIR:-}" ] && link_to_external_volume "output" "$COMFYUI_DIR/output" "$OUTPUT_DIR" "yes"
+    [ -n "${WORKFLOWS_DIR:-}" ] && link_to_external_volume "workflows" "$COMFYUI_DIR/user/default/workflows" "$WORKFLOWS_DIR" "no"
 fi
 
 # SSH env propagation: write /root/.ssh/environment from a curated list of
@@ -261,7 +274,7 @@ fi
 # which can include RUNPOD_API_KEY and other secrets that should NOT leak
 # into interactive shells.
 if [ -d /root/.ssh ]; then
-    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY WORKFLOWS_DIR OUTPUT_DIR MODELS_MANIFEST MODELS_MANIFEST_B64"
+    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY EXTERNAL_BASE_FOLDER MODELS_DIR WORKFLOWS_DIR OUTPUT_DIR MODELS_DIR_MIGRATE MODELS_MANIFEST MODELS_MANIFEST_B64"
     : > /root/.ssh/environment
     found_any=0
     for k in $env_allowlist; do

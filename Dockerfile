@@ -97,13 +97,6 @@ RUN chmod +x /usr/local/bin/bootstrap.sh
 
 COPY models-template.json /usr/local/share/models-template.json
 
-# ComfyUI extra_model_paths.yaml — tells ComfyUI to scan /workspace/models/ in
-# addition to its default /opt/ComfyUI/models/. Without this, the bootstrap's
-# downloads silently land in a path ComfyUI never reads. See SKILL.md §6.x
-# and references/comfyui-startup-pitfalls.md for the "no models visible
-# despite successful downloads" symptom this fixes.
-COPY extra_model_paths.yaml $COMFYUI_DIR/extra_model_paths.yaml
-
 # Entry script
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
