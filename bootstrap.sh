@@ -44,11 +44,11 @@ COMFYUI_DIR="${COMFYUI_DIR:-/opt/ComfyUI}"
 # /workspace/models, so they line up. If you customize one, customize both
 # (or just set EXTERNAL_BASE_FOLDER and let MODELS_ROOT default).
 MODELS_ROOT="${MODELS_ROOT:-${EXTERNAL_BASE_FOLDER:-/workspace}/models}"
-# IMPORTANT: $MODELS_MANIFEST is the JSON CONTENT of the manifest (set by
-# start.sh's entrypoint from the MODELS_MANIFEST_B64 / MODELS_MANIFEST env
-# vars), NOT a file path. The entrypoint already wrote the content to
-# /workspace/models.json — bootstrap should always read from the file path,
-# never from the env var. See PR #41 for the start.sh write logic.
+# IMPORTANT: $MODELS_MANIFEST_B64 is the base64-encoded JSON CONTENT of the
+# manifest (set by the orchestrator and decoded by start.sh's entrypoint),
+# NOT a file path. The entrypoint already wrote the decoded content to
+# /workspace/models.json — bootstrap should always read from the file path
+# ($MANIFEST_PATH or its default), never from the env var. See PR #41+#47.
 MANIFEST="${MANIFEST_PATH:-/workspace/models.json}"
 
 # Always create model dirs (no-op if they exist)
