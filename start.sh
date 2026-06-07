@@ -186,6 +186,68 @@ if [ -n "${WORKFLOWS_DIR:-}" ]; then
     fi
 fi
 
+# Custom output dir from env. If OUTPUT_DIR is set (typically a path on the
+# network volume, e.g. /workspace/output), symlink ComfyUI's default
+# $COMFYUI_DIR/output to it. Generated images, the GalleryManager's
+# .metadata.jsonl sidecar, and .thumbs/ all then land on the volume and
+# survive pod termination.
+#
+# We do NOT use extra_model_paths.yaml for this — that file only handles
+# model types (checkpoints, loras, vae, ...), not the output/input/temp/
+# user dirs. Those are hardcoded in folder_paths.py to $base_path/output,
+# where $base_path defaults to $COMFYUI_DIR. So a symlink on the FS is the
+# only way to redirect output to a network volume.
+#
+# We also do NOT bake any outputs into the image — the orchestrator owns
+# the canonical gallery on the host and pushes new images to the volume.
+# This keeps the image small and lets outputs accumulate independently of
+# image rebuilds.
+#
+# Behavior mirrors WORKFLOWS_DIR above:
+#   - OUTPUT_DIR unset → no symlink; ComfyUI writes to its default
+#     $COMFYUI_DIR/output on the container disk (lost on pod termination)
+#   - OUTPUT_DIR set, symlink doesn't exist → create it
+#   - OUTPUT_DIR set, symlink already exists → leave it alone (idempotent
+#     on container restarts, so re-running the entrypoint doesn't break)
+#   - OUTPUT_DIR set, $COMFYUI_DIR/output exists as a non-empty real dir
+#     (existing generated images) → migrate the contents to $OUTPUT_DIR,
+#     then replace the dir with a symlink
+if [ -n "${OUTPUT_DIR:-}" ]; then
+    OUT_LINK="$COMFYUI_DIR/output"
+    mkdir -p "$OUTPUT_DIR" 2>/dev/null || true
+    if [ -L "$OUT_LINK" ] || [ -e "$OUT_LINK" ]; then
+        if [ -d "$OUT_LINK" ] && [ ! -L "$OUT_LINK" ]; then
+            # Real (non-symlink) dir: migrate contents to OUTPUT_DIR, then
+            # atomically replace the dir with a symlink. We move files
+            # individually (not `mv $OUT_LINK/* $OUTPUT_DIR/` after rmdir)
+            # because the dir often contains a "_output_images_will_be_put_here"
+            # placeholder or partial subdirs we want to keep.
+            existing=$(ls -A "$OUT_LINK" 2>/dev/null | wc -l)
+            if [ "$existing" -gt 0 ]; then
+                echo "[entrypoint] Migrating $existing existing output file(s) from $OUT_LINK → $OUTPUT_DIR"
+                # Use find -mindepth 1 to move both top-level files and
+                # subdirs (e.g. .thumbs/, subfolders). Skip if the target
+                # already has a same-named file (don't clobber).
+                (cd "$OUT_LINK" && find . -mindepth 1 -maxdepth 1 \
+                    -exec sh -c '[ ! -e "$0/$1" ] && mv "$1" "$0/"' "$OUTPUT_DIR" {} \;)
+            fi
+            rmdir "$OUT_LINK" 2>/dev/null || rm -rf "$OUT_LINK"
+            ln -s "$OUTPUT_DIR" "$OUT_LINK"
+            echo "[entrypoint] Replaced real output dir with symlink → $OUTPUT_DIR"
+        else
+            echo "[entrypoint] Output dir $OUT_LINK is already a symlink, leaving as-is"
+        fi
+    else
+        ln -s "$OUTPUT_DIR" "$OUT_LINK"
+        echo "[entrypoint] Symlinked $OUT_LINK → $OUTPUT_DIR"
+    fi
+    # Sanity check — verify the symlink resolves
+    if [ -L "$OUT_LINK" ]; then
+        out_count=$(ls -A "$OUT_LINK" 2>/dev/null | wc -l)
+        echo "[entrypoint] Output dir contains $out_count file(s)"
+    fi
+fi
+
 # SSH env propagation: write /root/.ssh/environment from a curated list of
 # env vars so they survive into SSH login shells. By default sshd's
 # AcceptEnv is empty (or LANG LC_*), so PID 1's env is NOT inherited by
@@ -199,7 +261,7 @@ fi
 # which can include RUNPOD_API_KEY and other secrets that should NOT leak
 # into interactive shells.
 if [ -d /root/.ssh ]; then
-    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY WORKFLOWS_DIR MODELS_MANIFEST MODELS_MANIFEST_B64"
+    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY WORKFLOWS_DIR OUTPUT_DIR MODELS_MANIFEST MODELS_MANIFEST_B64"
     : > /root/.ssh/environment
     found_any=0
     for k in $env_allowlist; do

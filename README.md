@@ -113,6 +113,8 @@ The container will:
 | `CIVITAI_API_KEY` | Civitai API key for auth-required downloads |
 | `MODELS_MANIFEST` | Path to `models.json` (default: `/workspace/models.json`) |
 | `MODELS_ROOT` | Where models live (default: `/workspace/models`) |
+| `WORKFLOWS_DIR` | Symlinked to `$COMFYUI_DIR/user/default/workflows` (default: `/workspace/workflows`). Workflows uploaded here appear in the "Workflow → Load" menu. |
+| `OUTPUT_DIR` | Symlinked to `$COMFYUI_DIR/output` (default: `/workspace/output`). Generated images and the GalleryManager metadata land here. |
 
 ## Building Locally
 
