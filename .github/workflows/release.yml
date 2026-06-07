@@ -52,6 +52,13 @@ jobs:
       - name: Build and push release image
         run: |
           set -euo pipefail
+          # GitHub UI copy-paste of secrets often introduces trailing
+          # whitespace/newlines. Strip them or the image tag will be invalid
+          # (`***/*** :v1.4.0` with a literal space, see run 27104690093).
+          DOCKER_USERNAME="${DOCKER_USERNAME//[[:space:]]/}"
+          DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN//[[:space:]]/}"
+          DOCKERHUB_PROJECT_NAME="${DOCKERHUB_PROJECT_NAME//[[:space:]]/}"
+
           if [ -z "${DOCKER_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
             echo "::error::DOCKER_USERNAME and DOCKERHUB_TOKEN secrets must be set to publish a release."
             exit 1
