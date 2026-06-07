@@ -4,6 +4,18 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap` with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.2.0](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.1.2...v1.2.0) (2026-06-07)
+
+
+### Features
+
+* **start.sh:** EXTERNAL_BASE_FOLDER env var symlinks models/output/workflows to a volume (replaces extra_model_paths.yaml) ([#45](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/45)) ([e582969](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/e582969bfb51ca5c68af96656f5bd6850886119a))
+
+
+### Bug Fixes
+
+* **bootstrap:** source manifest path from MANIFEST_PATH + add 5 integration tests ([#43](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/43)) ([8237774](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/82377742e1dec280dee1de2a98b64415102ca02f))
+
 ## [1.1.2](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.1.1...v1.1.2) (2026-06-06)
 
 
