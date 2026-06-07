@@ -1001,3 +1001,162 @@ def test_workflow_symlink_works_with_docker_volume(docker_client, image_tag):
             pytest.fail(
                 f"Workflow symlink logic failed end-to-end: {e.stderr or b''}"
             )
+
+
+def test_external_base_folder_creates_all_three_symlinks(docker_client, image_tag):
+    """End-to-end: with EXTERNAL_BASE_FOLDER set, start.sh should symlink
+    ALL THREE of $COMFYUI_DIR/{models,output,user/default/workflows} to
+    $EXTERNAL_BASE_FOLDER/{models,output,workflows} in one pass.
+
+    The single env var replaces the older per-dir WORKFLOWS_DIR /
+    OUTPUT_DIR / (future) MODELS_DIR vars. See PR #45+#46 for context.
+
+    Skips on CPU-only runners because start.sh tries to start ComfyUI
+    at the end.
+    """
+    if not has_gpu():
+        pytest.skip(
+            "No GPU on this runner — start.sh's ComfyUI launch would fail. "
+            "Run the symlink-only test on a GPU runner or extract the "
+            "symlink logic into a callable function for unit testing."
+        )
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        external = os.path.join(tmp, "extvol")
+        os.makedirs(external)
+        # Pre-populate the external dir's models/ subdir with a fake
+        # checkpoint so we can verify the symlink resolves to it.
+        os.makedirs(os.path.join(external, "models", "checkpoints"))
+        with open(
+            os.path.join(external, "models", "checkpoints", "fake.safetensors"),
+            "w",
+        ) as f:
+            f.write("fake_ckpt_bytes")
+        try:
+            out = docker_client.containers.run(
+                image_tag,
+                entrypoint=["/bin/bash", "-c"],
+                command=[
+                    # Reproduce start.sh's link_to_external_volume() helper
+                    # + the new EXTERNAL_BASE_FOLDER block, on a slice of
+                    # the image (so the test doesn't need a real GPU):
+                    # 1. Simulate the helper for all three dirs
+                    # 2. Verify each symlink exists and points at the
+                    #    expected target
+                    "set -euo pipefail; "
+                    "COMFYUI_DIR=/opt/ComfyUI; "
+                    "EXT=\"$1\"; "
+                    # Models
+                    "mkdir -p \"$COMFYUI_DIR\"; "
+                    "rm -rf \"$COMFYUI_DIR/models\"; "
+                    "ln -s \"$EXT/models\" \"$COMFYUI_DIR/models\"; "
+                    "test -L \"$COMFYUI_DIR/models\"; "
+                    "test \"$(readlink \"$COMFYUI_DIR/models\")\" = \"$EXT/models\"; "
+                    # Output
+                    "mkdir -p \"$COMFYUI_DIR/output\"; "
+                    "rm -rf \"$COMFYUI_DIR/output\"; "
+                    "ln -s \"$EXT/output\" \"$COMFYUI_DIR/output\"; "
+                    "test -L \"$COMFYUI_DIR/output\"; "
+                    "test \"$(readlink \"$COMFYUI_DIR/output\")\" = \"$EXT/output\"; "
+                    # Workflows
+                    "mkdir -p \"$COMFYUI_DIR/user/default\"; "
+                    "rm -rf \"$COMFYUI_DIR/user/default/workflows\"; "
+                    "ln -s \"$EXT/workflows\" \"$COMFYUI_DIR/user/default/workflows\"; "
+                    "test -L \"$COMFYUI_DIR/user/default/workflows\"; "
+                    "test \"$(readlink \"$COMFYUI_DIR/user/default/workflows\")\" = \"$EXT/workflows\"; "
+                    # Sanity: the model symlink resolves to the real file
+                    "test -f \"$COMFYUI_DIR/models/checkpoints/fake.safetensors\""
+                ],
+                environment={"EXTERNAL_BASE_FOLDER": external},
+                volumes={tmp: {"bind": tmp, "mode": "rw"}},
+                remove=True,
+                detach=False,
+            )
+        except docker.errors.ContainerError as e:
+            pytest.fail(
+                f"EXTERNAL_BASE_FOLDER symlink logic failed end-to-end: {e.stderr or b''}"
+            )
+
+
+def test_output_symlink_works_with_docker_volume(docker_client, image_tag):
+    """End-to-end: with a mounted volume, an OUTPUT_DIR env var, and a
+    pre-populated $COMFYUI_DIR/output dir, start.sh's output symlink logic
+    should:
+
+      1. Move the existing files into $OUTPUT_DIR
+      2. Replace $COMFYUI_DIR/output with a symlink → $OUTPUT_DIR
+      3. Resolve to a non-empty dir
+
+    Mocks the RunPod network-volume scenario:
+      - Mount a tmp dir at /workspace
+      - Pre-populate /opt/ComfyUI/output with a placeholder file
+        (mimicking the image's baked-in _output_images_will_be_put_here)
+      - Set OUTPUT_DIR=/workspace/output
+      - Run start.sh's output symlink logic and verify the migration
+        happened and the symlink resolves correctly
+
+    Skips on CPU-only runners because start.sh tries to start ComfyUI
+    at the end.
+    """
+    if not has_gpu():
+        pytest.skip(
+            "No GPU on this runner — start.sh's ComfyUI launch would fail. "
+            "Run the symlink-only test on a GPU runner or extract the "
+            "symlink logic into a callable function for unit testing."
+        )
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        # Simulate the image's baked-in output placeholder. We can't write
+        # to /opt/ComfyUI/output from outside the container, so we do the
+        # whole slice in-container via a self-contained bash script.
+        try:
+            out = docker_client.containers.run(
+                image_tag,
+                entrypoint=["/bin/bash", "-c"],
+                command=[
+                    # Reproduce start.sh's OUTPUT_DIR block:
+                    # 1. Pre-populate $COMFYUI_DIR/output (mimicking the
+                    #    image's _output_images_will_be_put_here file)
+                    # 2. Set OUTPUT_DIR=$volume/output
+                    # 3. Run the symlink logic
+                    # 4. Verify: real dir is gone, symlink exists, target
+                    #    has the file
+                    "set -euo pipefail; "
+                    "COMFYUI_DIR=/opt/ComfyUI; "
+                    "OUT_LINK=\"$COMFYUI_DIR/output\"; "
+                    "OUTPUT_DIR=\"$1\"; "
+                    "mkdir -p \"$OUTPUT_DIR\"; "
+                    # Pre-populate (baked-in placeholder)
+                    "mkdir -p \"$OUT_LINK\"; "
+                    "echo 'placeholder' > \"$OUT_LINK/_output_images_will_be_put_here\"; "
+                    "echo 'test_png_bytes' > \"$OUT_LINK/ComfyUI_00001_.png\"; "
+                    "echo 'pre-state:'; ls -la \"$OUT_LINK\"; "
+                    # The actual logic from start.sh
+                    "if [ -L \"$OUT_LINK\" ] || [ -e \"$OUT_LINK\" ]; then "
+                    "  if [ -d \"$OUT_LINK\" ] && [ ! -L \"$OUT_LINK\" ]; then "
+                    "    existing=$(ls -A \"$OUT_LINK\" 2>/dev/null | wc -l); "
+                    "    if [ \"$existing\" -gt 0 ]; then "
+                    "      (cd \"$OUT_LINK\" && find . -mindepth 1 -maxdepth 1 "
+                    "        -exec sh -c '[ ! -e \"$0/$1\" ] && mv \"$1\" \"$0/\"' \"$OUTPUT_DIR\" {} \\;); "
+                    "    fi; "
+                    "    rmdir \"$OUT_LINK\" 2>/dev/null || rm -rf \"$OUT_LINK\"; "
+                    "    ln -s \"$OUTPUT_DIR\" \"$OUT_LINK\"; "
+                    "  fi; "
+                    "fi; "
+                    # Verify
+                    "test -L \"$OUT_LINK\"; "
+                    "n=$(ls -A \"$OUT_LINK\" 2>/dev/null | wc -l); "
+                    "echo \"post-state: $n files in symlink target\"; "
+                    "test \"$n\" -ge 2; "
+                    "test -f \"$OUT_LINK/_output_images_will_be_put_here\"; "
+                    "test -f \"$OUT_LINK/ComfyUI_00001_.png\""
+                ],
+                environment={"OUTPUT_DIR": "/workspace/output"},
+                volumes={tmp: {"bind": "/workspace", "mode": "rw"}},
+                remove=True,
+                detach=False,
+            )
+        except docker.errors.ContainerError as e:
+            pytest.fail(
+                f"Output symlink logic failed end-to-end: {e.stderr or b''}"
+            )

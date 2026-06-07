@@ -38,7 +38,12 @@ echo "=== ComfyUI Anime Bootstrap ==="
 # ComfyUI source dir is at /opt/ComfyUI (not /workspace/ComfyUI -- see
 # the comment in the Dockerfile for the volume-shadowing rationale).
 COMFYUI_DIR="${COMFYUI_DIR:-/opt/ComfyUI}"
-MODELS_ROOT="${MODELS_ROOT:-/workspace/models}"
+# Where the bootstrap writes downloads. On a network-volume pod, start.sh's
+# EXTERNAL_BASE_FOLDER has already symlinked $COMFYUI_DIR/models →
+# $EXTERNAL_BASE_FOLDER/models, and the default for both below is
+# /workspace/models, so they line up. If you customize one, customize both
+# (or just set EXTERNAL_BASE_FOLDER and let MODELS_ROOT default).
+MODELS_ROOT="${MODELS_ROOT:-${EXTERNAL_BASE_FOLDER:-/workspace}/models}"
 # IMPORTANT: $MODELS_MANIFEST is the JSON CONTENT of the manifest (set by
 # start.sh's entrypoint from the MODELS_MANIFEST_B64 / MODELS_MANIFEST env
 # vars), NOT a file path. The entrypoint already wrote the content to
