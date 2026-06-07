@@ -79,6 +79,13 @@ jobs:
           PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
           VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
 
+          # GitHub UI copy-paste of secrets often introduces trailing
+          # whitespace/newlines. Strip them or the image tag will be invalid
+          # (`***/*** :v1.4.0` with a literal space, see run 27104690093).
+          DOCKER_USERNAME="${DOCKER_USERNAME//[[:space:]]/}"
+          DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN//[[:space:]]/}"
+          DOCKERHUB_PROJECT_NAME="${DOCKERHUB_PROJECT_NAME//[[:space:]]/}"
+
           # DOCKER_USERNAME and DOCKERHUB_PROJECT_NAME are required for the
           # build to be pushed. Fail fast with a clear error if either is
           # missing (the PR-validation runner might not have them set).
