@@ -38,6 +38,12 @@ defaults:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Docker Hub mirror — read from secret so the username isn't hardcoded.
+  # Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN in repo Settings → Secrets to enable.
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  # Skip Docker Hub mirror entirely if either secret is missing.
+  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
 jobs:
   build:
@@ -71,9 +77,27 @@ jobs:
 
           PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
           VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
-          TAGS="${REGISTRY}/${IMAGE_NAME}:${TAG_PREFIX}${VARIANT_TAG}"
+
+          # IMAGE_NAME on GHCR is "<owner>/<repo>"; Docker Hub uses the bare repo
+          # under DOCKERHUB_USERNAME (e.g. docker.io/<user>/<repo>).
+          REPO="${IMAGE_NAME##*/}"
+          GHCR_BASE="${REGISTRY}/${IMAGE_NAME}"
+          DOCKERHUB_BASE="docker.io/${DOCKERHUB_USERNAME}/${REPO}"
+
+          TAGS="${GHCR_BASE}:${TAG_PREFIX}${VARIANT_TAG}"
           if [ "${IS_LATEST}" = "true" ]; then
-            TAGS="${TAGS},${REGISTRY}/${IMAGE_NAME}:latest"
+            TAGS="${TAGS},${GHCR_BASE}:latest"
+          fi
+
+          # Mirror to Docker Hub when both secrets are set. Public images on
+          # Docker Hub are free to push (Docker Pro not required for public repos).
+          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
+            TAGS="${TAGS},${DOCKERHUB_BASE}:${TAG_PREFIX}${VARIANT_TAG}"
+            if [ "${IS_LATEST}" = "true" ]; then
+              TAGS="${TAGS},${DOCKERHUB_BASE}:latest"
+            fi
+          else
+            echo "::notice::DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
           fi
 
           {
@@ -85,16 +109,22 @@ jobs:
             printf 'tag_prefix=%s\n'   "${TAG_PREFIX}"
             printf 'variant_tag=%s\n'  "${VARIANT_TAG}"
             printf 'tags=%s\n'         "${TAGS}"
+            printf 'push_to_dockerhub=%s\n' "${PUSH_TO_DOCKERHUB}"
+            printf 'dockerhub_base=%s\n' "${DOCKERHUB_BASE:-}"
           } >> "$GITHUB_OUTPUT"
 
           echo "--- build configuration ---"
-          echo "pytorch_tag:  ${PYTORCH_TAG}"
-          echo "cuda:         ${CUDA}"
-          echo "pytorch:      ${PYTORCH}"
-          echo "driver_floor: ${DRIVER_FLOOR}"
-          echo "is_latest:    ${IS_LATEST}"
-          echo "tag_prefix:   ${TAG_PREFIX}"
-          echo "image tags:   ${TAGS}"
+          echo "pytorch_tag:      ${PYTORCH_TAG}"
+          echo "cuda:             ${CUDA}"
+          echo "pytorch:          ${PYTORCH}"
+          echo "driver_floor:     ${DRIVER_FLOOR}"
+          echo "is_latest:        ${IS_LATEST}"
+          echo "tag_prefix:       ${TAG_PREFIX}"
+          echo "image tags:       ${TAGS}"
+          echo "push_to_dockerhub: ${PUSH_TO_DOCKERHUB}"
+          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
+            echo "dockerhub_base:   ${DOCKERHUB_BASE}"
+          fi
           echo "----------------------------"
 
       - name: Verify base image exists on Docker Hub
@@ -120,7 +150,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push to GHCR
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request' && env.PUSH_TO_DOCKERHUB == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Build and push to GHCR (and Docker Hub if secrets set)
         if: github.event_name != 'pull_request'
         id: build
         uses: docker/build-push-action@v7
