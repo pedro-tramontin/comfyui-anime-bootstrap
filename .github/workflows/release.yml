@@ -12,10 +12,14 @@ env:
   PYTORCH_VERSION: '2.12.0'
   DRIVER_FLOOR: '12080'
   # Docker Hub mirror — read from secret so the username isn't hardcoded.
-  # Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN in repo Settings → Secrets to enable.
-  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  # Required secrets (set in repo Settings → Secrets):
+  #   DOCKER_USERNAME          — Docker Hub account
+  #   DOCKERHUB_TOKEN          — Docker Hub access token (Read/Write/Delete on the target repo)
+  #   DOCKERHUB_PROJECT_NAME   — Docker Hub repo name (defaults to "${IMAGE_NAME##*/}" if empty)
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+  DOCKERHUB_PROJECT_NAME: ${{ secrets.DOCKERHUB_PROJECT_NAME }}
+  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
 jobs:
   release:
@@ -52,14 +56,15 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: docker.io
-          username: ${{ env.DOCKERHUB_USERNAME }}
+          username: ${{ env.DOCKER_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Build and push release image
         run: |
           set -euo pipefail
           VERSION="${{ steps.cfg.outputs.version }}"
-          REPO="${IMAGE_NAME##*/}"  # strip "owner/" prefix for Docker Hub
+          REPO="${IMAGE_NAME##*/}"  # bare repo name (used when DOCKERHUB_PROJECT_NAME is empty)
+          DOCKERHUB_REPO="${DOCKERHUB_PROJECT_NAME:-${REPO}}"
 
           # GHCR
           GHCR_TAG="${REGISTRY}/${IMAGE_NAME}:v${VERSION}"
@@ -69,8 +74,8 @@ jobs:
           DOCKERHUB_TAG=""
           DOCKERHUB_LATEST=""
           if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
-            DOCKERHUB_TAG="docker.io/${DOCKERHUB_USERNAME}/${REPO}:v${VERSION}"
-            DOCKERHUB_LATEST="docker.io/${DOCKERHUB_USERNAME}/${REPO}:latest"
+            DOCKERHUB_TAG="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}:v${VERSION}"
+            DOCKERHUB_LATEST="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}:latest"
           fi
 
           docker build \
@@ -90,7 +95,7 @@ jobs:
             docker tag "${GHCR_TAG}" "${DOCKERHUB_LATEST}"
             docker push "${DOCKERHUB_LATEST}"
           else
-            echo "::notice::DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
+            echo "::notice::DOCKER_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
           fi
 
           echo ""

@@ -39,11 +39,15 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   # Docker Hub mirror — read from secret so the username isn't hardcoded.
-  # Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN in repo Settings → Secrets to enable.
-  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  # Required secrets (set in repo Settings → Secrets):
+  #   DOCKER_USERNAME          — Docker Hub account
+  #   DOCKERHUB_TOKEN          — Docker Hub access token (Read/Write/Delete on the target repo)
+  #   DOCKERHUB_PROJECT_NAME   — Docker Hub repo name (defaults to "${IMAGE_NAME##*/}" if empty)
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-  # Skip Docker Hub mirror entirely if either secret is missing.
-  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+  DOCKERHUB_PROJECT_NAME: ${{ secrets.DOCKERHUB_PROJECT_NAME }}
+  # Skip Docker Hub mirror entirely if DOCKER_USERNAME or DOCKERHUB_TOKEN is missing.
+  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
 jobs:
   build:
@@ -78,26 +82,29 @@ jobs:
           PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
           VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
 
-          # IMAGE_NAME on GHCR is "<owner>/<repo>"; Docker Hub uses the bare repo
-          # under DOCKERHUB_USERNAME (e.g. docker.io/<user>/<repo>).
+          # IMAGE_NAME on GHCR is "<owner>/<repo>"; Docker Hub uses
+          # DOCKERHUB_PROJECT_NAME (overridable) or the bare repo name under
+          # DOCKER_USERNAME (e.g. docker.io/<user>/<repo>).
           REPO="${IMAGE_NAME##*/}"
           GHCR_BASE="${REGISTRY}/${IMAGE_NAME}"
-          DOCKERHUB_BASE="docker.io/${DOCKERHUB_USERNAME}/${REPO}"
+          DOCKERHUB_REPO="${DOCKERHUB_PROJECT_NAME:-${REPO}}"
+          DOCKERHUB_BASE="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}"
 
           TAGS="${GHCR_BASE}:${TAG_PREFIX}${VARIANT_TAG}"
           if [ "${IS_LATEST}" = "true" ]; then
             TAGS="${TAGS},${GHCR_BASE}:latest"
           fi
 
-          # Mirror to Docker Hub when both secrets are set. Public images on
-          # Docker Hub are free to push (Docker Pro not required for public repos).
+          # Mirror to Docker Hub when both required secrets are set. Public
+          # images on Docker Hub are free to push (Docker Pro not required
+          # for public repos).
           if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
             TAGS="${TAGS},${DOCKERHUB_BASE}:${TAG_PREFIX}${VARIANT_TAG}"
             if [ "${IS_LATEST}" = "true" ]; then
               TAGS="${TAGS},${DOCKERHUB_BASE}:latest"
             fi
           else
-            echo "::notice::DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
+            echo "::notice::DOCKER_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
           fi
 
           {
@@ -155,7 +162,7 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: docker.io
-          username: ${{ env.DOCKERHUB_USERNAME }}
+          username: ${{ env.DOCKER_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Build and push to GHCR (and Docker Hub if secrets set)

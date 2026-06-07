@@ -45,10 +45,10 @@ The image is built from one `pytorch/pytorch` base per run. Each image carries O
 
 ### Registries
 
-Each release is pushed to **both** registries (Docker Hub mirror is auto-skipped if the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are not set):
+Each release is pushed to **both** registries (Docker Hub mirror is auto-skipped if the `DOCKER_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are not set):
 
 - `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:<tag>`
-- `docker.io/<DOCKERHUB_USERNAME>/comfyui-anime-bootstrap:<tag>`
+- `docker.io/<DOCKER_USERNAME>/<DOCKERHUB_PROJECT_NAME or "comfyui-anime-bootstrap">:<tag>`
 
 Use the Docker Hub tag on providers that can't reach `ghcr.io` (some Vast.ai hosts). Same digest either way.
 
