@@ -43,6 +43,15 @@ The image is built from one `pytorch/pytorch` base per run. Each image carries O
 
 > **Older bases:** to publish a variant for an older driver, re-trigger the GitHub Actions workflow manually (Actions → Build and Push → Run workflow) and change the inputs. The image gets tagged `cuda<X>-pytorch<Y>` and (optionally) `:latest`.
 
+### Registries
+
+Each release is pushed to **both** registries (Docker Hub mirror is auto-skipped if the `DOCKER_USERNAME` / `DOCKERHUB_TOKEN` repo secrets are not set):
+
+- `ghcr.io/pedro-tramontin/comfyui-anime-bootstrap:<tag>`
+- `docker.io/<DOCKER_USERNAME>/<DOCKERHUB_PROJECT_NAME or "comfyui-anime-bootstrap">:<tag>`
+
+Use the Docker Hub tag on providers that can't reach `ghcr.io` (some Vast.ai hosts). Same digest either way.
+
 **Programmatic selection:**
 
 ```bash

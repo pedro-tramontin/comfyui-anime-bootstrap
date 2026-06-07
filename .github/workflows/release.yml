@@ -11,6 +11,15 @@ env:
   CUDA_VERSION: '13.0'
   PYTORCH_VERSION: '2.12.0'
   DRIVER_FLOOR: '12080'
+  # Docker Hub mirror — read from secret so the username isn't hardcoded.
+  # Required secrets (set in repo Settings → Secrets):
+  #   DOCKER_USERNAME          — Docker Hub account
+  #   DOCKERHUB_TOKEN          — Docker Hub access token (Read/Write/Delete on the target repo)
+  #   DOCKERHUB_PROJECT_NAME   — Docker Hub repo name (defaults to "${IMAGE_NAME##*/}" if empty)
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  DOCKERHUB_PROJECT_NAME: ${{ secrets.DOCKERHUB_PROJECT_NAME }}
+  PUSH_TO_DOCKERHUB: ${{ secrets.DOCKER_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
 
 jobs:
   release:
@@ -42,26 +51,59 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: env.PUSH_TO_DOCKERHUB == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
       - name: Build and push release image
         run: |
           set -euo pipefail
           VERSION="${{ steps.cfg.outputs.version }}"
-          TAG="${REGISTRY}/${IMAGE_NAME}:v${VERSION}"
-          LATEST="${REGISTRY}/${IMAGE_NAME}:latest"
+          REPO="${IMAGE_NAME##*/}"  # bare repo name (used when DOCKERHUB_PROJECT_NAME is empty)
+          DOCKERHUB_REPO="${DOCKERHUB_PROJECT_NAME:-${REPO}}"
+
+          # GHCR
+          GHCR_TAG="${REGISTRY}/${IMAGE_NAME}:v${VERSION}"
+          GHCR_LATEST="${REGISTRY}/${IMAGE_NAME}:latest"
+
+          # Docker Hub mirror (only if secrets are set)
+          DOCKERHUB_TAG=""
+          DOCKERHUB_LATEST=""
+          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
+            DOCKERHUB_TAG="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}:v${VERSION}"
+            DOCKERHUB_LATEST="docker.io/${DOCKER_USERNAME}/${DOCKERHUB_REPO}:latest"
+          fi
 
           docker build \
             --build-arg CUDA_VERSION="${CUDA_VERSION}" \
             --build-arg PYTORCH_VERSION="${PYTORCH_VERSION}" \
             --build-arg DRIVER_FLOOR="${DRIVER_FLOOR}" \
-            -t "${TAG}" \
+            -t "${GHCR_TAG}" \
             .
 
-          docker push "${TAG}"
-          docker tag "${TAG}" "${LATEST}"
-          docker push "${LATEST}"
+          docker push "${GHCR_TAG}"
+          docker tag "${GHCR_TAG}" "${GHCR_LATEST}"
+          docker push "${GHCR_LATEST}"
+
+          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
+            docker tag "${GHCR_TAG}" "${DOCKERHUB_TAG}"
+            docker push "${DOCKERHUB_TAG}"
+            docker tag "${GHCR_TAG}" "${DOCKERHUB_LATEST}"
+            docker push "${DOCKERHUB_LATEST}"
+          else
+            echo "::notice::DOCKER_USERNAME and/or DOCKERHUB_TOKEN secrets are missing; skipping Docker Hub mirror."
+          fi
 
           echo ""
           echo "=== Release complete ==="
           echo "Published v${VERSION}"
-          echo "  - ${TAG}"
-          echo "  - ${LATEST}"
+          echo "  - ${GHCR_TAG}"
+          echo "  - ${GHCR_LATEST}"
+          if [ "${PUSH_TO_DOCKERHUB}" = "true" ]; then
+            echo "  - ${DOCKERHUB_TAG}"
+            echo "  - ${DOCKERHUB_LATEST}"
+          fi
