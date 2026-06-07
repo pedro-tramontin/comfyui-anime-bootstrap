@@ -551,8 +551,8 @@ def test_start_sh_writes_ssh_environment_file(docker_client, image_tag):
     """start.sh must write /root/.ssh/environment from an allowlist.
 
     This is the SSH env propagation path: PID 1's HF_TOKEN,
-    CIVITAI_API_KEY, WORKFLOWS_DIR, MODELS_MANIFEST get written to
-    /root/.ssh/environment (chmod 600) so PermitUserEnvironment=yes
+    CIVITAI_API_KEY, EXTERNAL_BASE_FOLDER, MODELS_MANIFEST_B64 get
+    written to /root/.ssh/environment (chmod 600) so PermitUserEnvironment=yes
     in sshd_config can source them into SSH login shells.
     """
     try:
@@ -598,12 +598,11 @@ def test_ssh_environment_uses_allowlist_not_blanket(docker_client, image_tag):
 
 
 def test_start_sh_decodes_manifest_b64(docker_client, image_tag):
-    """start.sh must try MODELS_MANIFEST_B64 first (base64 path).
+    """start.sh must decode MODELS_MANIFEST_B64 into /workspace/models.json.
 
-    This is the preferred path for the manifest env var because raw
-    multi-line JSON can get mangled by env-marshalling layers; base64
-    is single-line and survives. MODELS_MANIFEST (raw) should still
-    work as a back-compat fallback.
+    This is the canonical path for the manifest env var. Base64 is
+    single-line and survives RunPod's env-marshalling layer (raw
+    multi-line JSON gets truncated at the first \n).
     """
     try:
         out = docker_client.containers.run(
@@ -633,7 +632,7 @@ def test_bootstrap_does_not_source_manifest_path_from_content_env_var(
     file path. Result: bootstrap's `[ -f "$MANIFEST" ]` test always failed
     silently and the model-download step was skipped on every pod start.
 
-    The contract: $MODELS_MANIFEST / $MODELS_MANIFEST_B64 = manifest CONTENT.
+    The contract: $MODELS_MANIFEST_B64 = manifest CONTENT (base64).
     $MANIFEST_PATH (or its default) = manifest file PATH. Bootstrap must
     only ever use the PATH env var (or its hard-coded default), never the
     CONTENT env var.
@@ -883,124 +882,68 @@ def test_manifest_end_to_end_writer_to_reader(docker_client, image_tag):
             )
 
 
-def test_bootstrap_ignores_models_manifest_env_var_content(docker_client, image_tag):
+def test_bootstrap_ignores_models_manifest_b64_env_var_content(docker_client, image_tag):
     """The bug-class guard, most explicit form.
 
-    Specifically: even if $MODELS_MANIFEST (the CONTENT env var) is set
-    to a JSON blob, bootstrap.sh must NOT treat it as a file path and
-    silently fail `[ -f "$MANIFEST" ]` — that was the bug.
+    Specifically: even if $MODELS_MANIFEST_B64 (the CONTENT env var) is set
+    to a base64 JSON blob, bootstrap.sh must NOT treat it as a file path
+    and silently fail `[ -f "$MANIFEST" ]`. Bootstrap should always
+    source its file path from $MANIFEST_PATH (or its default), never
+    from the content env var.
 
-    This test runs bootstrap.sh with $MODELS_MANIFEST set to a
-    multi-line JSON blob (not a file path) and with NO $MANIFEST_PATH
+    This test runs bootstrap.sh with $MODELS_MANIFEST_B64 set to a
+    base64 JSON blob (not a file path) and with NO $MANIFEST_PATH
     and NO /workspace/models.json file. bootstrap should fall back to
     /usr/local/share/models-template.json (the baked-in template), NOT
-    treat the JSON content as a file path.
+    treat the base64 content as a file path.
     """
+    import base64
     bogus_content = (
         '{"checkpoints":[{"name":"should-not-load","url":"http://x","dest":"a","size":1}]}'
     )
+    bogus_b64 = base64.b64encode(bogus_content.encode()).decode()
     try:
         log = docker_client.containers.run(
             image_tag,
             entrypoint=["/bin/bash", "-c"],
             command=[
                 # Clear any pre-existing manifest and run bootstrap with
-                # $MODELS_MANIFEST set to JSON content (the wrong contract).
+                # $MODELS_MANIFEST_B64 set to base64 content (the wrong contract
+                # from bootstrap's perspective — it only knows $MANIFEST_PATH).
                 "rm -f /workspace/models.json; "
-                "export MODELS_MANIFEST='" + bogus_content + "'; "
+                "export MODELS_MANIFEST_B64='" + bogus_b64 + "'; "
                 "unset MANIFEST_PATH; "
-                # Run bootstrap. It must NOT print "No manifest at ${...JSON CONTENT...}".
+                # Run bootstrap. It must NOT print "No manifest at ${base64...}".
                 # It SHOULD use the baked-in template (the safe fallback).
                 "log=$(/usr/local/bin/bootstrap.sh 2>&1); "
                 "echo \"$log\"; "
                 # The dangerous symptom of the old bug:
-                # bootstrap would echo "$MANIFEST" (the literal JSON content)
-                # in the \"No models manifest at $MANIFEST\" line. We assert
-                # the JSON content never appears in a path-style message.
+                # bootstrap would echo "$MANIFEST" (the literal content) in
+                # the "No models manifest at $MANIFEST" line. We assert the
+                # sentinel name never appears in a path-style context.
                 "echo \"$log\" | grep -q 'should-not-load' && "
                 "  { echo 'FAIL: bootstrap read content-env as a path and tried to download should-not-load'; "
                 "    echo '(this is the exact bug from PR #41 followup)'; exit 1; }; "
-                # Conversely, it SHOULD use the baked-in template (animagine-xl-4.0).
-                # The bootstrap log mentions the template's single entry when
-                # it falls back. We assert at least the baked-in path appears
-                # in a \"copied template\" / \"No models manifest at\" / similar
-                # log line that proves it didn't try to read the JSON as a path.
+                # Conversely, it SHOULD use the baked-in template. We assert
+                # at least one manifest-path message appeared in the log.
                 "echo \"$log\" | grep -qE 'models\\.json|models-template\\.json' || "
                 "  { echo 'FAIL: bootstrap did not log any manifest-path message'; exit 1; }; "
-                "echo 'OK: bootstrap ignored $MODELS_MANIFEST content and used the safe fallback'"
+                "echo 'OK: bootstrap ignored $MODELS_MANIFEST_B64 content and used the safe fallback'"
             ],
-            environment={"MODELS_MANIFEST": bogus_content},
+            environment={"MODELS_MANIFEST_B64": bogus_b64},
             remove=True,
             detach=False,
         )
     except docker_errors.ContainerError as e:
         pytest.fail(
-            "bootstrap.sh is reading $MODELS_MANIFEST (content) as a file path. "
-            "The expected behaviour: $MODELS_MANIFEST is manifest CONTENT, "
-            "bootstrap should source its file path from $MANIFEST_PATH "
-            "(or default /workspace/models.json). When neither is set, "
-            "bootstrap falls back to /usr/local/share/models-template.json. "
+            "bootstrap.sh may be reading $MODELS_MANIFEST_B64 (content) as "
+            "a file path. The expected behaviour: $MODELS_MANIFEST_B64 is "
+            "manifest CONTENT (base64), bootstrap should source its file "
+            "path from $MANIFEST_PATH (or default /workspace/models.json). "
+            "When neither is set, bootstrap falls back to "
+            "/usr/local/share/models-template.json. "
             f"stderr: {(e.stderr or b'').decode(errors='replace')}"
         )
-
-
-def test_workflow_symlink_works_with_docker_volume(docker_client, image_tag):
-    """End-to-end: with a mounted volume + a workflow .json file at the
-    expected location, start.sh's workflows symlink path should resolve
-    correctly to a non-empty dir.
-
-    Mocks the RunPod network-volume scenario:
-      - Mount a tmp dir at /workspace
-      - Drop asuka-animagine-workflow.json in /workspace/workflows/
-      - Set WORKFLOWS_DIR=/workspace/workflows in the env
-      - Run start.sh's symlink logic and verify the link is created
-        and resolves to a non-empty dir
-
-    Skips on CPU-only runners because start.sh tries to start ComfyUI
-    at the end.
-    """
-    if not has_gpu():
-        pytest.skip(
-            "No GPU on this runner — start.sh's ComfyUI launch would fail. "
-            "Run the symlink-only test on a GPU runner or extract the "
-            "symlink logic into a callable function for unit testing."
-        )
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp:
-        workflows_dir = os.path.join(tmp, "workflows")
-        os.makedirs(workflows_dir)
-        wf_file = os.path.join(workflows_dir, "asuka-animagine-workflow.json")
-        with open(wf_file, "w") as f:
-            f.write("{}")  # minimal valid JSON; the test only checks existence
-        try:
-            out = docker_client.containers.run(
-                image_tag,
-                entrypoint=["/bin/bash", "-c"],
-                command=[
-                    # Reproduce the relevant slice of start.sh:
-                    # 1. Make sure user/default/ exists
-                    # 2. Symlink it to WORKFLOWS_DIR
-                    # 3. Verify the symlink resolves to a non-empty dir
-                    "set -euo pipefail; "
-                    "COMFYUI_DIR=/opt/ComfyUI; "
-                    "WF_LINK=\"$COMFYUI_DIR/user/default/workflows\"; "
-                    "mkdir -p \"$(dirname \"$WF_LINK\")\"; "
-                    "mkdir -p \"$WORKFLOWS_DIR\"; "
-                    "ln -sfn \"$WORKFLOWS_DIR\" \"$WF_LINK\"; "
-                    "test -L \"$WF_LINK\"; "
-                    "n=$(ls -A \"$WF_LINK\" | wc -l); "
-                    "echo \"WF_LINK resolves to $n files\"; "
-                    "test \"$n\" -gt 0"
-                ],
-                environment={"WORKFLOWS_DIR": workflows_dir},
-                volumes={tmp: {"bind": tmp, "mode": "rw"}},
-                remove=True,
-                detach=False,
-            )
-        except docker.errors.ContainerError as e:
-            pytest.fail(
-                f"Workflow symlink logic failed end-to-end: {e.stderr or b''}"
-            )
 
 
 def test_external_base_folder_creates_all_three_symlinks(docker_client, image_tag):
@@ -1008,8 +951,8 @@ def test_external_base_folder_creates_all_three_symlinks(docker_client, image_ta
     ALL THREE of $COMFYUI_DIR/{models,output,user/default/workflows} to
     $EXTERNAL_BASE_FOLDER/{models,output,workflows} in one pass.
 
-    The single env var replaces the older per-dir WORKFLOWS_DIR /
-    OUTPUT_DIR / (future) MODELS_DIR vars. See PR #45+#46 for context.
+    The single env var replaces the older per-dir OUTPUT_DIR / MODELS_DIR
+    overrides. See PR #45+#47 for context.
 
     Skips on CPU-only runners because start.sh tries to start ComfyUI
     at the end.

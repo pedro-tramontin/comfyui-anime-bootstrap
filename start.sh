@@ -58,17 +58,13 @@ ssh-keygen -A 2>/dev/null || echo "[ssh] hostkey generation failed (non-fatal)"
 # the need for any pre-staging step or scp — the env var is the single
 # source of truth for the manifest on a fresh volume.
 #
-# Two env-var keys are supported, in priority order:
-#   1. MODELS_MANIFEST_B64 — base64-encoded JSON. This is the preferred
-#      path because Linux env vars cannot contain raw newlines (the
-#      RunPod container agent truncates at the first \n, silently
-#      corrupting the JSON). Base64 is single-line and survives the
-#      transport intact. The launcher writes this.
-#   2. MODELS_MANIFEST — raw JSON. Kept for back-compat with any older
-#      orchestrator that hasn't been updated. Often truncated on real
-#      RunPod deploys; we still try it as a best-effort fallback.
+# The single env-var key for manifests is MODELS_MANIFEST_B64 — base64-encoded
+# JSON. This is the only supported path because Linux env vars cannot contain
+# raw newlines (the RunPod container agent truncates at the first \n, silently
+# corrupting the JSON). Base64 is single-line and survives the transport
+# intact. The launcher writes this.
 #
-# If neither env var is set (or both fail jq validation), bootstrap will
+# If MODELS_MANIFEST_B64 is unset (or fails jq validation), bootstrap will
 # fall back to /usr/local/share/models-template.json (baked into the
 # image at build time).
 write_manifest_from_env() {
@@ -100,22 +96,16 @@ if [ -n "${MODELS_MANIFEST_B64:-}" ]; then
     if command -v base64 >/dev/null 2>&1; then
         decoded=$(printf '%s' "$MODELS_MANIFEST_B64" | base64 -d 2>/dev/null) || decoded=""
         if [ -n "$decoded" ]; then
-            write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded" && goto_manifest_done=true
+            write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded"
         else
-            echo "[entrypoint] WARN: base64 decode failed — falling back to MODELS_MANIFEST"
+            echo "[entrypoint] WARN: base64 decode failed — bootstrap will fall back to baked-in models-template.json"
         fi
     else
-        echo "[entrypoint] WARN: base64 command not available — falling back to MODELS_MANIFEST"
+        echo "[entrypoint] WARN: base64 command not available — bootstrap will fall back to baked-in models-template.json"
     fi
 fi
 
-# Path 2: raw manifest (back-compat — often truncated on RunPod)
-if [ "${goto_manifest_done:-}" != "true" ] && [ -n "${MODELS_MANIFEST:-}" ]; then
-    echo "[entrypoint] MODELS_MANIFEST env var set (${#MODELS_MANIFEST} bytes) — writing /workspace/models.json"
-    write_manifest_from_env "MODELS_MANIFEST" "$MODELS_MANIFEST" || true
-fi
-
-unset decoded goto_manifest_done
+unset decoded
 
 # Run bootstrap — failures here MUST NOT block ComfyUI startup.
 # A download or git pull issue should be logged and the user can fix it manually.
@@ -208,11 +198,12 @@ fi
 # the canonical knob — one env var, three symlinks, all of them on the
 # same persistent volume.
 #
-# Per-dir overrides (MODELS_DIR, OUTPUT_DIR, WORKFLOWS_DIR) take precedence
-# over the derived values for advanced cases (e.g. a user wants models on
-# one volume and output on another). They are independent: any subset
+# Per-dir overrides (MODELS_DIR, OUTPUT_DIR) take precedence over the
+# derived values for advanced cases (e.g. a user wants models on one
+# volume and output on another). They are independent: either or both
 # may be set, and unset vars fall through to the EXTERNAL_BASE_FOLDER
-# derivation.
+# derivation. The workflows symlink has no per-dir override — workflows
+# always live at $EXTERNAL_BASE_FOLDER/workflows.
 #
 # Why a symlink and not extra_model_paths.yaml? extra_model_paths.yaml
 # only handles model TYPES (checkpoints, loras, vae, ...), not the
@@ -249,16 +240,18 @@ if [ -n "${EXTERNAL_BASE_FOLDER:-}" ]; then
     # orchestrator; any local "put_*_here" placeholder is junk.
     link_to_external_volume "workflows" \
         "$COMFYUI_DIR/user/default/workflows" \
-        "${WORKFLOWS_DIR:-$EXTERNAL_BASE_FOLDER/workflows}" \
+        "$EXTERNAL_BASE_FOLDER/workflows" \
         "no"
-elif [ -n "${WORKFLOWS_DIR:-}" ] || [ -n "${OUTPUT_DIR:-}" ] || [ -n "${MODELS_DIR:-}" ]; then
+elif [ -n "${OUTPUT_DIR:-}" ] || [ -n "${MODELS_DIR:-}" ]; then
     # Backward-compat: allow the per-dir vars to work on their own
     # (e.g. an older orchestrator that hasn't been updated to set
-    # EXTERNAL_BASE_FOLDER). One or more of the three may be set.
+    # EXTERNAL_BASE_FOLDER). Either or both may be set.
     echo "[entrypoint] Per-dir override detected (no EXTERNAL_BASE_FOLDER) — linking only the specified dir(s)"
     [ -n "${MODELS_DIR:-}" ] && link_to_external_volume "models" "$COMFYUI_DIR/models" "$MODELS_DIR" "${MODELS_DIR_MIGRATE:-no}"
     [ -n "${OUTPUT_DIR:-}" ] && link_to_external_volume "output" "$COMFYUI_DIR/output" "$OUTPUT_DIR" "yes"
-    [ -n "${WORKFLOWS_DIR:-}" ] && link_to_external_volume "workflows" "$COMFYUI_DIR/user/default/workflows" "$WORKFLOWS_DIR" "no"
+    # Workflows always link to $EXTERNAL_BASE_FOLDER/workflows when
+    # EXTERNAL_BASE_FOLDER is set; without it, no link is created and
+    # ComfyUI uses its in-image default workflow dir.
 fi
 
 # SSH env propagation: write /root/.ssh/environment from a curated list of
@@ -274,7 +267,7 @@ fi
 # which can include RUNPOD_API_KEY and other secrets that should NOT leak
 # into interactive shells.
 if [ -d /root/.ssh ]; then
-    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY EXTERNAL_BASE_FOLDER MODELS_DIR WORKFLOWS_DIR OUTPUT_DIR MODELS_DIR_MIGRATE MODELS_MANIFEST MODELS_MANIFEST_B64"
+    env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY EXTERNAL_BASE_FOLDER MODELS_DIR OUTPUT_DIR MODELS_DIR_MIGRATE MODELS_MANIFEST_B64"
     : > /root/.ssh/environment
     found_any=0
     for k in $env_allowlist; do

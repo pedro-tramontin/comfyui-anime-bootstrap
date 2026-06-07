@@ -111,11 +111,10 @@ The container will:
 |----------|-------------|
 | `HF_TOKEN` | HuggingFace read token for gated models |
 | `CIVITAI_API_KEY` | Civitai API key for auth-required downloads |
-| `MODELS_MANIFEST` | Path to `models.json` (default: `/workspace/models.json`) |
+| `MODELS_MANIFEST_B64` | Base64-encoded `models.json`. The single env-var path for shipping a manifest — the launcher writes this so newlines survive. (Set this OR let bootstrap use the baked-in `models-template.json`.) |
 | `MODELS_ROOT` | Where the bootstrap writes downloads (default: `$EXTERNAL_BASE_FOLDER/models`, else `/workspace/models`) |
 | `EXTERNAL_BASE_FOLDER` | Symlinks `$COMFYUI_DIR/{models,output,user/default/workflows}` to `$EXTERNAL_BASE_FOLDER/{models,output,workflows}`. Set this to mount all three on a network volume with one knob. |
 | `MODELS_DIR` | Per-dir override of `$EXTERNAL_BASE_FOLDER/models`. Rarely needed. |
-| `WORKFLOWS_DIR` | Per-dir override of `$EXTERNAL_BASE_FOLDER/workflows`. Rarely needed. |
 | `OUTPUT_DIR` | Per-dir override of `$EXTERNAL_BASE_FOLDER/output`. Rarely needed. |
 
 ## Building Locally
