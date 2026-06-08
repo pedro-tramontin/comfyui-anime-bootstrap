@@ -100,41 +100,55 @@ write_manifest_from_env() {
 if [ -n "${MODELS_MANIFEST_B64:-}" ]; then
     echo "[entrypoint] MODELS_MANIFEST_B64 env var set (${#MODELS_MANIFEST_B64} b64-chars) — decoding"
     if command -v base64 >/dev/null 2>&1; then
-        raw_b64=$(printf '%s' "$MODELS_MANIFEST_B64" | base64 -d 2>/dev/null) || raw_b64=""
-        if [ -n "$raw_b64" ]; then
-            decoded=""
-            # Try gzip-decode first: a gzip file starts with the magic bytes
-            # 0x1f 0x8b. Read the first 2 bytes and check them with bash.
-            # We avoid requiring xxd/od by using a one-shot printf compare.
-            if command -v gunzip >/dev/null 2>&1; then
-                gzip_magic_check=$(printf '%s' "$raw_b64" | head -c 2 | od -An -tx1 2>/dev/null | tr -d ' \n')
-                if [ "$gzip_magic_check" = "1f8b" ]; then
-                    if decoded=$(printf '%s' "$raw_b64" | gunzip 2>/dev/null); then
-                        echo "[entrypoint] Detected gzip-compressed manifest — gunzipped to ${#decoded} bytes"
-                    else
-                        echo "[entrypoint] WARN: gzip magic present but gunzip failed — trying raw b64"
-                        decoded=""
+        # IMPORTANT: do NOT use $() command substitution to capture the decoded
+        # binary bytes. Bash strings are NUL-terminated; a compressed manifest
+        # routinely contains NUL bytes (we hit one in the gzip header at byte
+        # offset 3), and $() will silently truncate at the first NUL, producing
+        # a partial stream that gunzip rejects with "stdin is encrypted".
+        # Use a tmpfile for the binary intermediate, and only use $() on the
+        # final decoded text.
+        raw_tmp=$(mktemp)
+        if printf '%s' "$MODELS_MANIFEST_B64" | base64 -d > "$raw_tmp" 2>/dev/null; then
+            raw_size=$(stat -c%s "$raw_tmp" 2>/dev/null || echo 0)
+            if [ "$raw_size" -gt 0 ]; then
+                decoded=""
+                # Try gzip-decode first: a gzip file starts with the magic bytes
+                # 0x1f 0x8b. Read the first 2 bytes and check them with od.
+                if command -v gunzip >/dev/null 2>&1; then
+                    gzip_magic_check=$(head -c 2 "$raw_tmp" | od -An -tx1 2>/dev/null | tr -d ' \n')
+                    if [ "$gzip_magic_check" = "1f8b" ]; then
+                        decoded_tmp=$(mktemp)
+                        if gunzip -c "$raw_tmp" > "$decoded_tmp" 2>/dev/null; then
+                            decoded=$(cat "$decoded_tmp")
+                            echo "[entrypoint] Detected gzip-compressed manifest — gunzipped to ${#decoded} bytes"
+                        else
+                            echo "[entrypoint] WARN: gzip magic present but gunzip failed — trying raw b64"
+                        fi
+                        rm -f "$decoded_tmp"
                     fi
                 fi
-            fi
-            # Fall back: treat the base64-decoded bytes as plain JSON.
-            if [ -z "$decoded" ]; then
-                decoded="$raw_b64"
-            fi
-            if [ -n "$decoded" ]; then
-                write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded"
+                # Fall back: treat the base64-decoded bytes as plain JSON.
+                if [ -z "$decoded" ]; then
+                    decoded=$(cat "$raw_tmp")
+                fi
+                if [ -n "$decoded" ]; then
+                    write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded"
+                else
+                    echo "[entrypoint] WARN: manifest decode produced empty result — falling back"
+                fi
             else
-                echo "[entrypoint] WARN: manifest decode produced empty result — falling back"
+                echo "[entrypoint] WARN: base64 decode produced empty result — falling back"
             fi
         else
             echo "[entrypoint] WARN: base64 decode failed — bootstrap will fall back to baked-in models-template.json"
         fi
+        rm -f "$raw_tmp"
     else
         echo "[entrypoint] WARN: base64 command not available — bootstrap will fall back to baked-in models-template.json"
     fi
 fi
 
-unset decoded raw_b64
+unset decoded raw_tmp decoded_tmp
 
 # Run bootstrap — failures here MUST NOT block ComfyUI startup.
 # A download or git pull issue should be logged and the user can fix it manually.

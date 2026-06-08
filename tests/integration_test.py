@@ -841,19 +841,33 @@ def test_manifest_end_to_end_writer_to_reader(docker_client, image_tag):
                     # plain base64(JSON) OR gzip+base64 — we auto-detect via
                     # the gzip magic bytes 1f 8b. See start.sh for the real
                     # implementation; this inline copy MUST stay in sync.
+                    #
+                    # IMPORTANT: do NOT use $() command substitution on the
+                    # decoded binary bytes. Bash strings are NUL-terminated;
+                    # a compressed manifest can contain NUL bytes (we hit one
+                    # at offset 3 of the gzip header), and $() will silently
+                    # truncate at the first NUL. Use a tmpfile for the
+                    # binary intermediate.
                     "if [ -n \\\"${MODELS_MANIFEST_B64:-}\\\" ]; then "
-                    "  raw_b64=$(printf \\\"%s\\\" \\\"$MODELS_MANIFEST_B64\\\" | base64 -d 2>/dev/null) || raw_b64=\\\"\\\"; "
-                    "  decoded=\\\"\\\"; "
-                    "  if command -v gunzip >/dev/null 2>&1; then "
-                    "    gzip_magic_check=$(printf \\\"%s\\\" \\\"$raw_b64\\\" | head -c 2 | od -An -tx1 2>/dev/null | tr -d \\\" \\n\\\"); "
-                    "    if [ \\\"$gzip_magic_check\\\" = \\\"1f8b\\\" ]; then "
-                    "      decoded=$(printf \\\"%s\\\" \\\"$raw_b64\\\" | gunzip 2>/dev/null) || decoded=\\\"\\\"; "
+                    "  raw_tmp=$(mktemp); "
+                    "  if printf \\\"%s\\\" \\\"$MODELS_MANIFEST_B64\\\" | base64 -d > \\\"$raw_tmp\\\" 2>/dev/null; then "
+                    "    decoded=\\\"\\\"; "
+                    "    if command -v gunzip >/dev/null 2>&1; then "
+                    "      gzip_magic_check=$(head -c 2 \\\"$raw_tmp\\\" | od -An -tx1 2>/dev/null | tr -d \\\" \\\\n\\\"); "
+                    "      if [ \\\"$gzip_magic_check\\\" = \\\"1f8b\\\" ]; then "
+                    "        decoded_tmp=$(mktemp); "
+                    "        if gunzip -c \\\"$raw_tmp\\\" > \\\"$decoded_tmp\\\" 2>/dev/null; then "
+                    "          decoded=$(cat \\\"$decoded_tmp\\\"); "
+                    "        fi; "
+                    "        rm -f \\\"$decoded_tmp\\\"; "
+                    "      fi; "
+                    "    fi; "
+                    "    if [ -z \\\"$decoded\\\" ]; then decoded=$(cat \\\"$raw_tmp\\\"); fi; "
+                    "    if [ -n \\\"$decoded\\\" ]; then "
+                    "      write_manifest_from_env MODELS_MANIFEST_B64 \\\"$decoded\\\"; "
                     "    fi; "
                     "  fi; "
-                    "  if [ -z \\\"$decoded\\\" ]; then decoded=\\\"$raw_b64\\\"; fi; "
-                    "  if [ -n \\\"$decoded\\\" ]; then "
-                    "    write_manifest_from_env MODELS_MANIFEST_B64 \\\"$decoded\\\"; "
-                    "  fi; "
+                    "  rm -f \\\"$raw_tmp\\\"; "
                     "fi; "
                     # Contract assertion 1: file exists
                     "test -f /workspace/models.json || { echo \"FAIL: /workspace/models.json not written\"; exit 1; }; "
@@ -969,20 +983,30 @@ def test_manifest_end_to_end_gzip_b64_writer_to_reader(docker_client, image_tag)
                     "  return 1; "
                     "}; "
                     # gzip+b64 branch — see start.sh
-                    "if [ -n \"${MODELS_MANIFEST_B64:-}\" ]; then "
-                    "  raw_b64=$(printf \"%s\" \"$MODELS_MANIFEST_B64\" | base64 -d 2>/dev/null) || raw_b64=\"\"; "
-                    "  decoded=\"\"; "
-                    "  if command -v gunzip >/dev/null 2>&1; then "
-                    "    gzip_magic_check=$(printf \"%s\" \"$raw_b64\" | head -c 2 | od -An -tx1 2>/dev/null | tr -d \" \\n\"); "
-                    "    if [ \"$gzip_magic_check\" = \"1f8b\" ]; then "
-                    "      decoded=$(printf \"%s\" \"$raw_b64\" | gunzip 2>/dev/null) || decoded=\"\"; "
-                    "      echo \"[entrypoint] Detected gzip-compressed manifest — gunzipped to ${#decoded} bytes\"; "
+                    #
+                    # IMPORTANT: do NOT use $() on the decoded binary bytes;
+                    # bash NUL-truncates. Use tmpfiles for binary intermediates.
+                    "if [ -n \\\"${MODELS_MANIFEST_B64:-}\\\" ]; then "
+                    "  raw_tmp=$(mktemp); "
+                    "  if printf \\\"%s\\\" \\\"$MODELS_MANIFEST_B64\\\" | base64 -d > \\\"$raw_tmp\\\" 2>/dev/null; then "
+                    "    decoded=\\\"\\\"; "
+                    "    if command -v gunzip >/dev/null 2>&1; then "
+                    "      gzip_magic_check=$(head -c 2 \\\"$raw_tmp\\\" | od -An -tx1 2>/dev/null | tr -d \\\" \\\\n\\\"); "
+                    "      if [ \\\"$gzip_magic_check\\\" = \\\"1f8b\\\" ]; then "
+                    "        decoded_tmp=$(mktemp); "
+                    "        if gunzip -c \\\"$raw_tmp\\\" > \\\"$decoded_tmp\\\" 2>/dev/null; then "
+                    "          decoded=$(cat \\\"$decoded_tmp\\\"); "
+                    "          echo \\\"[entrypoint] Detected gzip-compressed manifest — gunzipped to ${#decoded} bytes\\\"; "
+                    "        fi; "
+                    "        rm -f \\\"$decoded_tmp\\\"; "
+                    "      fi; "
+                    "    fi; "
+                    "    if [ -z \\\"$decoded\\\" ]; then decoded=$(cat \\\"$raw_tmp\\\"); fi; "
+                    "    if [ -n \\\"$decoded\\\" ]; then "
+                    "      write_manifest_from_env MODELS_MANIFEST_B64 \\\"$decoded\\\"; "
                     "    fi; "
                     "  fi; "
-                    "  if [ -z \"$decoded\" ]; then decoded=\"$raw_b64\"; fi; "
-                    "  if [ -n \"$decoded\" ]; then "
-                    "    write_manifest_from_env MODELS_MANIFEST_B64 \"$decoded\"; "
-                    "  fi; "
+                    "  rm -f \\\"$raw_tmp\\\"; "
                     "fi; "
                     "test -f /workspace/models.json || { echo \"FAIL: /workspace/models.json not written\"; exit 1; }; "
                     "jq -e \".checkpoints[0].name == \\\"test-sentinel-gzip-checkpoint\\\"\" "
