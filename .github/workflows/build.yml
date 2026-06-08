@@ -5,13 +5,21 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Build mode: "single" builds one variant from the cuda/pytorch inputs below; "all-supported" builds a matrix of all three currently-supported variants (cuda13.0+pt2.12, cuda12.4+pt2.6, cuda12.1+pt2.5). The newest variant in the matrix is also tagged :latest when is_latest=true.'
+        required: false
+        type: choice
+        default: 'all-supported'
+        options:
+          - single
+          - all-supported
       cuda:
-        description: 'CUDA major.minor (e.g. 13.0). Used for the image tag and the pytorch/pytorch base.'
+        description: 'CUDA major.minor (e.g. 13.0). Used for the image tag and the pytorch/pytorch base. Ignored when mode=all-supported.'
         required: false
         default: '13.0'
         type: string
       pytorch:
-        description: 'PyTorch version (e.g. 2.12.0). Used for the image tag and the pytorch/pytorch base.'
+        description: 'PyTorch version (e.g. 2.12.0). Used for the image tag and the pytorch/pytorch base. Ignored when mode=all-supported.'
         required: false
         default: '2.12.0'
         type: string
@@ -21,7 +29,7 @@ on:
         default: '12080'
         type: string
       is_latest:
-        description: 'If true, ALSO tag this image as :latest.'
+        description: 'If true, ALSO tag this image as :latest. In matrix mode only the newest variant gets :latest; older variants get only their variant tag.'
         required: false
         type: boolean
         default: true
@@ -37,24 +45,41 @@ defaults:
 
 env:
   IMAGE_REPO: ${{ github.event.repository.name }}
-  # Docker Hub is the sole registry. The username and project name are
-  # overridable via secrets so the workflow isn't tied to one account.
-  # Required secrets (set in repo Settings → Secrets):
-  #   DOCKER_USERNAME          — Docker Hub account
-  #   DOCKERHUB_TOKEN          — Docker Hub access token (Read/Write/Delete on the target repo)
-  #   DOCKERHUB_PROJECT_NAME   — Docker Hub repo name (defaults to "${IMAGE_REPO}" if empty)
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   DOCKERHUB_PROJECT_NAME: ${{ secrets.DOCKERHUB_PROJECT_NAME }}
 
 jobs:
   build:
-    name: build-image
+    name: build-image (${{ matrix.variant_label || inputs.cuda || '?' }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       attestations: write
       id-token: write
+
+    # In matrix mode, fan out across the three currently-supported variants.
+    # The newest variant (cuda13.0+pt2.12) is the one tagged :latest when
+    # is_latest=true; older variants get only their variant tag.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: '13.0'
+            pytorch: '2.12.0'
+            driver_floor: '12080'
+            is_latest: true
+            variant_label: 'cuda13.0-pytorch2.12.0'
+          - cuda: '12.4'
+            pytorch: '2.6.0'
+            driver_floor: '550'
+            is_latest: false
+            variant_label: 'cuda12.4-pytorch2.6.0'
+          - cuda: '12.1'
+            pytorch: '2.5.1'
+            driver_floor: '530'
+            is_latest: false
+            variant_label: 'cuda12.1-pytorch2.5.1'
 
     steps:
       - name: Checkout
@@ -68,27 +93,38 @@ jobs:
           in_driver_floor: ${{ inputs.driver_floor }}
           in_is_latest: ${{ inputs.is_latest }}
           in_tag_prefix: ${{ inputs.tag_prefix }}
+          in_mode: ${{ inputs.mode }}
         run: |
           set -euo pipefail
-          CUDA="${in_cuda:-13.0}"
-          PYTORCH="${in_pytorch:-2.12.0}"
-          DRIVER_FLOOR="${in_driver_floor:-12080}"
-          IS_LATEST="${in_is_latest:-true}"
+          MODE="${in_mode:-single}"
+
+          if [ "$MODE" = "all-supported" ]; then
+            # Matrix mode: pull cuda/pytorch/driver_floor/is_latest from the matrix entry.
+            # matrix.* is empty on pull_request, so this branch is workflow_dispatch-only.
+            CUDA="${{ matrix.cuda }}"
+            PYTORCH="${{ matrix.pytorch }}"
+            DRIVER_FLOOR="${{ matrix.driver_floor }}"
+            IS_LATEST="${{ matrix.is_latest }}"
+            VARIANT_LABEL="${{ matrix.variant_label }}"
+          else
+            # Single mode: use the user-provided inputs (or defaults).
+            CUDA="${in_cuda:-13.0}"
+            PYTORCH="${in_pytorch:-2.12.0}"
+            DRIVER_FLOOR="${in_driver_floor:-12080}"
+            IS_LATEST="${in_is_latest:-true}"
+            VARIANT_LABEL=""
+          fi
           TAG_PREFIX="${in_tag_prefix:-}"
 
           PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
           VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
 
           # GitHub UI copy-paste of secrets often introduces trailing
-          # whitespace/newlines. Strip them or the image tag will be invalid
-          # (`***/*** :v1.4.0` with a literal space, see run 27104690093).
+          # whitespace/newlines. Strip them or the image tag will be invalid.
           DOCKER_USERNAME="${DOCKER_USERNAME//[[:space:]]/}"
           DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN//[[:space:]]/}"
           DOCKERHUB_PROJECT_NAME="${DOCKERHUB_PROJECT_NAME//[[:space:]]/}"
 
-          # DOCKER_USERNAME and DOCKERHUB_PROJECT_NAME are required for the
-          # build to be pushed. Fail fast with a clear error if either is
-          # missing (the PR-validation runner might not have them set).
           if [ -z "${DOCKER_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
             echo "::error::DOCKER_USERNAME and DOCKERHUB_TOKEN secrets must be set to build this image."
             exit 1
@@ -109,20 +145,24 @@ jobs:
             printf 'is_latest=%s\n'    "${IS_LATEST}"
             printf 'tag_prefix=%s\n'   "${TAG_PREFIX}"
             printf 'variant_tag=%s\n'  "${VARIANT_TAG}"
+            printf 'variant_label=%s\n' "${VARIANT_LABEL}"
             printf 'image=%s\n'        "${IMAGE}"
             printf 'tags=%s\n'         "${TAGS}"
+            printf 'mode=%s\n'         "${MODE}"
           } >> "$GITHUB_OUTPUT"
 
-          echo "--- build configuration ---"
+          echo "--- build configuration (mode=${MODE}) ---"
           echo "pytorch_tag:  ${PYTORCH_TAG}"
           echo "cuda:         ${CUDA}"
           echo "pytorch:      ${PYTORCH}"
           echo "driver_floor: ${DRIVER_FLOOR}"
           echo "is_latest:    ${IS_LATEST}"
           echo "tag_prefix:   ${TAG_PREFIX}"
+          echo "variant_tag:  ${VARIANT_TAG}"
+          echo "variant_label:${VARIANT_LABEL}"
           echo "image:        ${IMAGE}"
           echo "image tags:   ${TAGS}"
-          echo "----------------------------"
+          echo "------------------------------------"
 
       - name: Verify base image exists on Docker Hub
         run: |
