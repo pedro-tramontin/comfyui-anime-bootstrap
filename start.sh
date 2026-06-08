@@ -90,13 +90,42 @@ write_manifest_from_env() {
     fi
 }
 
-# Path 1: base64-encoded manifest (preferred — survives newline mangling)
+# Path 1: base64-encoded manifest (preferred — survives newline mangling).
+# The encoded payload may be EITHER plain base64(JSON) OR gzip-compressed-then-
+# base64 (gzip + b64 = 30-40% smaller, which matters for orchestrators like
+# Vast.ai that cap the launch env at 4 KB). We try the gzip path first, then
+# fall back to raw b64 if gunzip fails or the result isn't valid JSON. This
+# keeps backwards compatibility with manifests produced before the gzip
+# convention was introduced.
 if [ -n "${MODELS_MANIFEST_B64:-}" ]; then
     echo "[entrypoint] MODELS_MANIFEST_B64 env var set (${#MODELS_MANIFEST_B64} b64-chars) — decoding"
     if command -v base64 >/dev/null 2>&1; then
-        decoded=$(printf '%s' "$MODELS_MANIFEST_B64" | base64 -d 2>/dev/null) || decoded=""
-        if [ -n "$decoded" ]; then
-            write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded"
+        raw_b64=$(printf '%s' "$MODELS_MANIFEST_B64" | base64 -d 2>/dev/null) || raw_b64=""
+        if [ -n "$raw_b64" ]; then
+            decoded=""
+            # Try gzip-decode first: a gzip file starts with the magic bytes
+            # 0x1f 0x8b. Read the first 2 bytes and check them with bash.
+            # We avoid requiring xxd/od by using a one-shot printf compare.
+            if command -v gunzip >/dev/null 2>&1; then
+                gzip_magic_check=$(printf '%s' "$raw_b64" | head -c 2 | od -An -tx1 2>/dev/null | tr -d ' \n')
+                if [ "$gzip_magic_check" = "1f8b" ]; then
+                    if decoded=$(printf '%s' "$raw_b64" | gunzip 2>/dev/null); then
+                        echo "[entrypoint] Detected gzip-compressed manifest — gunzipped to ${#decoded} bytes"
+                    else
+                        echo "[entrypoint] WARN: gzip magic present but gunzip failed — trying raw b64"
+                        decoded=""
+                    fi
+                fi
+            fi
+            # Fall back: treat the base64-decoded bytes as plain JSON.
+            if [ -z "$decoded" ]; then
+                decoded="$raw_b64"
+            fi
+            if [ -n "$decoded" ]; then
+                write_manifest_from_env "MODELS_MANIFEST_B64" "$decoded"
+            else
+                echo "[entrypoint] WARN: manifest decode produced empty result — falling back"
+            fi
         else
             echo "[entrypoint] WARN: base64 decode failed — bootstrap will fall back to baked-in models-template.json"
         fi
@@ -105,7 +134,7 @@ if [ -n "${MODELS_MANIFEST_B64:-}" ]; then
     fi
 fi
 
-unset decoded
+unset decoded raw_b64
 
 # Run bootstrap — failures here MUST NOT block ComfyUI startup.
 # A download or git pull issue should be logged and the user can fix it manually.
@@ -268,6 +297,11 @@ fi
 # into interactive shells.
 if [ -d /root/.ssh ]; then
     env_allowlist="HF_TOKEN HUGGING_FACE_HUB_TOKEN CIVITAI_API_KEY EXTERNAL_BASE_FOLDER MODELS_DIR OUTPUT_DIR MODELS_DIR_MIGRATE MODELS_MANIFEST_B64"
+    # Note: MODELS_MANIFEST_B64 is the base64 of the manifest content, which
+    # may itself be gzip-compressed (see the gunzip branch in this file).
+    # When forwarded to /root/.ssh/environment, the value stays base64 —
+    # we just hand the same blob to interactive shells. Login shells can
+    # re-decode it with: printf '%s' "$MODELS_MANIFEST_B64" | base64 -d | gunzip
     : > /root/.ssh/environment
     found_any=0
     for k in $env_allowlist; do

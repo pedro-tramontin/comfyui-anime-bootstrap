@@ -837,11 +837,22 @@ def test_manifest_end_to_end_writer_to_reader(docker_client, image_tag):
                     "  echo \"[writer] FAILED to write /workspace/models.json from $src_desc\"; "
                     "  return 1; "
                     "}; "
-                    # Path 1: B64 (what the launcher sends)
-                    "if [ -n \"${MODELS_MANIFEST_B64:-}\" ]; then "
-                    "  decoded=$(printf \"%s\" \"$MODELS_MANIFEST_B64\" | base64 -d 2>/dev/null) || decoded=\"\"; "
-                    "  if [ -n \"$decoded\" ]; then "
-                    "    write_manifest_from_env MODELS_MANIFEST_B64 \"$decoded\"; "
+                    # Path 1: B64 (what the launcher sends). The payload may be
+                    # plain base64(JSON) OR gzip+base64 — we auto-detect via
+                    # the gzip magic bytes 1f 8b. See start.sh for the real
+                    # implementation; this inline copy MUST stay in sync.
+                    "if [ -n \\\"${MODELS_MANIFEST_B64:-}\\\" ]; then "
+                    "  raw_b64=$(printf \\\"%s\\\" \\\"$MODELS_MANIFEST_B64\\\" | base64 -d 2>/dev/null) || raw_b64=\\\"\\\"; "
+                    "  decoded=\\\"\\\"; "
+                    "  if command -v gunzip >/dev/null 2>&1; then "
+                    "    gzip_magic_check=$(printf \\\"%s\\\" \\\"$raw_b64\\\" | head -c 2 | od -An -tx1 2>/dev/null | tr -d \\\" \\n\\\"); "
+                    "    if [ \\\"$gzip_magic_check\\\" = \\\"1f8b\\\" ]; then "
+                    "      decoded=$(printf \\\"%s\\\" \\\"$raw_b64\\\" | gunzip 2>/dev/null) || decoded=\\\"\\\"; "
+                    "    fi; "
+                    "  fi; "
+                    "  if [ -z \\\"$decoded\\\" ]; then decoded=\\\"$raw_b64\\\"; fi; "
+                    "  if [ -n \\\"$decoded\\\" ]; then "
+                    "    write_manifest_from_env MODELS_MANIFEST_B64 \\\"$decoded\\\"; "
                     "  fi; "
                     "fi; "
                     # Contract assertion 1: file exists
@@ -878,6 +889,125 @@ def test_manifest_end_to_end_writer_to_reader(docker_client, image_tag):
                 "Check: (a) start.sh writer at /usr/local/bin/start.sh, "
                 "(b) bootstrap.sh reader at /usr/local/bin/bootstrap.sh, "
                 "(c) the default paths agree on /workspace/models.json. "
+                f"stderr: {(e.stderr or b'').decode(errors='replace')}"
+            )
+
+
+def test_manifest_end_to_end_gzip_b64_writer_to_reader(docker_client, image_tag):
+    """End-to-end contract: with MODELS_MANIFEST_B64 set to a gzip+base64
+    payload (the new space-efficient path), start.sh's entrypoint logic
+    must gunzip + write the manifest to disk, and bootstrap.sh must read
+    it back and enumerate the models in it.
+
+    This is the Vast.ai-friendly path: the launch env field is capped at
+    4 KB and a gzip-b64 manifest is ~30% smaller than raw b64, which
+    matters once you have more than one or two model entries.
+    """
+    import base64
+    import gzip
+
+    # Same sentinel manifest as the raw-b64 test — distinguishable from
+    # the baked-in template (which has one checkpoint, animagine-xl-4.0).
+    test_manifest = {
+        "checkpoints": [
+            {
+                "name": "test-sentinel-gzip-checkpoint",
+                "url": "http://example.invalid/test-cp-gz.safetensors",
+                "dest": "checkpoints/test-sentinel-gz-cp.safetensors",
+                "size": 1,
+                "auth": "none",
+            }
+        ],
+        "loras": [],
+        "vae": [],
+        "text_encoders": [],
+        "controlnet": [],
+    }
+    manifest_json = json.dumps(test_manifest)
+    # gzip-9 + b64 — exactly the shape we want to ship in the Vast template env.
+    manifest_gz_b64 = base64.b64encode(gzip.compress(manifest_json.encode(), compresslevel=9)).decode()
+
+    # Sanity-check the payload looks like gzip on the wire.
+    assert base64.b64decode(manifest_gz_b64)[:2] == b"\x1f\x8b", "test fixture is not actually gzipped"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Pre-stage the destination file so bootstrap's size-match passes
+        # without needing network.
+        cp_dest = os.path.join(tmp, "models", "checkpoints", "test-sentinel-gz-cp.safetensors")
+        os.makedirs(os.path.dirname(cp_dest), exist_ok=True)
+        with open(cp_dest, "wb") as f:
+            f.write(b"x")
+
+        try:
+            log = docker_client.containers.run(
+                image_tag,
+                entrypoint=["/bin/bash", "-c"],
+                command=[
+                    # Inline the start.sh writer (gunzip branch) and the
+                    # helper definitions. See start.sh for the real
+                    # implementation; this inline copy MUST stay in sync.
+                    "set -uo pipefail; "
+                    "bash -c '"
+                    "set -uo pipefail; "
+                    "log_json_preview() { "
+                    "  local label=$1 path=$2; "
+                    "  [ -f \"$path\" ] || { echo \"$label (no file at $path)\"; return; }; "
+                    "  local total; total=$(wc -l < \"$path\" 2>/dev/null | tr -d \" \"); "
+                    "  echo \"$label $total lines\"; "
+                    "}; "
+                    "write_manifest_from_env() { "
+                    "  local src_desc=$1 raw=$2; "
+                    "  if printf \"%s\" \"$raw\" > /workspace/models.json.tmp 2>/dev/null; then "
+                    "    if command -v jq >/dev/null 2>&1 && "
+                    "       jq -e . /workspace/models.json.tmp >/dev/null 2>&1; then "
+                    "      mv /workspace/models.json.tmp /workspace/models.json; "
+                    "      echo \"[writer] wrote /workspace/models.json from $src_desc\"; "
+                    "      return 0; "
+                    "    fi; "
+                    "  fi; "
+                    "  echo \"[writer] FAILED to write /workspace/models.json from $src_desc\"; "
+                    "  return 1; "
+                    "}; "
+                    # gzip+b64 branch — see start.sh
+                    "if [ -n \"${MODELS_MANIFEST_B64:-}\" ]; then "
+                    "  raw_b64=$(printf \"%s\" \"$MODELS_MANIFEST_B64\" | base64 -d 2>/dev/null) || raw_b64=\"\"; "
+                    "  decoded=\"\"; "
+                    "  if command -v gunzip >/dev/null 2>&1; then "
+                    "    gzip_magic_check=$(printf \"%s\" \"$raw_b64\" | head -c 2 | od -An -tx1 2>/dev/null | tr -d \" \\n\"); "
+                    "    if [ \"$gzip_magic_check\" = \"1f8b\" ]; then "
+                    "      decoded=$(printf \"%s\" \"$raw_b64\" | gunzip 2>/dev/null) || decoded=\"\"; "
+                    "      echo \"[entrypoint] Detected gzip-compressed manifest — gunzipped to ${#decoded} bytes\"; "
+                    "    fi; "
+                    "  fi; "
+                    "  if [ -z \"$decoded\" ]; then decoded=\"$raw_b64\"; fi; "
+                    "  if [ -n \"$decoded\" ]; then "
+                    "    write_manifest_from_env MODELS_MANIFEST_B64 \"$decoded\"; "
+                    "  fi; "
+                    "fi; "
+                    "test -f /workspace/models.json || { echo \"FAIL: /workspace/models.json not written\"; exit 1; }; "
+                    "jq -e \".checkpoints[0].name == \\\"test-sentinel-gzip-checkpoint\\\"\" "
+                    "    /workspace/models.json >/dev/null || "
+                    "  { echo \"FAIL: written manifest missing test-sentinel-gzip-checkpoint\"; exit 1; }; "
+                    "log=$(/usr/local/bin/bootstrap.sh 2>&1); "
+                    "echo \"$log\"; "
+                    "echo \"$log\" | grep -q \"test-sentinel-gzip-checkpoint\" || "
+                    "  { echo \"FAIL: bootstrap did not enumerate test-sentinel-gzip-checkpoint\"; exit 1; }; "
+                    "echo \"OK: writer→reader contract holds (gzip-b64 → gunzip → file → bootstrap)\"; "
+                    "'"
+                ],
+                environment={"MODELS_MANIFEST_B64": manifest_gz_b64},
+                volumes={tmp: {"bind": "/workspace", "mode": "rw"}},
+                remove=True,
+                detach=False,
+            )
+        except docker_errors.ContainerError as e:
+            pytest.fail(
+                "Gzip+base64 manifest end-to-end contract FAILED. "
+                "start.sh did not gunzip MODELS_MANIFEST_B64, OR "
+                "bootstrap.sh did not see the written manifest. "
+                "Check: (a) start.sh has the gunzip branch at "
+                "/usr/local/bin/start.sh, (b) the gzip magic-byte check "
+                "uses od (not xxd, which is not in this image). "
                 f"stderr: {(e.stderr or b'').decode(errors='replace')}"
             )
 
