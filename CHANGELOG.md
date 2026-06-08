@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to Docker Hub (`pedrotramn/comfyui-anime-bootstrap`) with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.6.1](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.6.0...v1.6.1) (2026-06-08)
+
+
+### Bug Fixes
+
+* **start.sh:** NUL-byte-safe decode of MODELS_MANIFEST_B64 ([#58](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/58)) ([c77d852](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/c77d852b55112ed0c5a613c78ab1b7fe5198abd0))
+
 ## [1.6.0](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.5.0...v1.6.0) (2026-06-08)
 
 
