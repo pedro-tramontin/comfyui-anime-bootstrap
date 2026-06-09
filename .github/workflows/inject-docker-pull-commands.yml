@@ -24,28 +24,29 @@ jobs:
       - name: Rewrite release body with pull commands
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          TAG:     ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          VERSION="${TAG#v}"   # strip leading 'v'
+          # TAG is e.g. "v1.7.4". gh release view/edit want the full
+          # tag name (with 'v'), so keep TAG as-is for those calls.
+          # VER is the bare semver ("1.7.4") for substituting into
+          # the docker pull commands we generate.
+          TAG="${{ github.event.release.tag_name }}"
+          VER="${TAG#v}"
 
-          # Fetch the existing release body (the auto-generated changelog
-          # from release-please). We pass the full "owner/repo" so gh
-          # doesn't try to guess from a missing git context.
           REPO="${{ github.repository }}"
-          EXISTING=$(gh release view "${VERSION}" --repo "${REPO}" --json body --jq '.body // ""')
+          EXISTING=$(gh release view "${TAG}" --repo "${REPO}" --json body --jq '.body // ""')
 
           {
             printf '## Docker Images\n\n'
-            printf '### `pedront/comfyui-anime-bootstrap:v%s` (default — driver 580+, CUDA 13.0, PyTorch 2.7.0)\n\n' "${VERSION}"
-            printf '```\ndocker pull pedront/comfyui-anime-bootstrap:v%s\n```\n\n' "${VERSION}"
+            printf '### `pedront/comfyui-anime-bootstrap:v%s` (default — driver 580+, CUDA 13.0, PyTorch 2.7.0)\n\n' "${VER}"
+            printf '```\ndocker pull pedront/comfyui-anime-bootstrap:v%s\n```\n\n' "${VER}"
             printf '### Fallback variants (older NVIDIA drivers)\n\n'
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.8-pytorch2.7.0` (driver 570+)\n' "${VERSION}"
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.4-pytorch2.6.0` (driver 550+, e.g. RTX 3090/4090/A4000)\n' "${VERSION}"
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.1-pytorch2.6.0` (driver 535+)\n' "${VERSION}"
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda13.0-pytorch2.7.0` (driver 580+)\n\n' "${VERSION}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.8-pytorch2.7.0` (driver 570+)\n' "${VER}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.4-pytorch2.6.0` (driver 550+, e.g. RTX 3090/4090/A4000)\n' "${VER}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.1-pytorch2.6.0` (driver 535+)\n' "${VER}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda13.0-pytorch2.7.0` (driver 580+)\n\n' "${VER}"
             printf '%s\n' "${EXISTING}"
           } > /tmp/release-body.md
 
           cat /tmp/release-body.md
-          gh release edit "${VERSION}" --repo "${REPO}" --notes-file /tmp/release-body.md
+          gh release edit "${TAG}" --repo "${REPO}" --notes-file /tmp/release-body.md
