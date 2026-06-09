@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to Docker Hub (`pedrotramn/comfyui-anime-bootstrap`) with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.7.0](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.6.5...v1.7.0) (2026-06-09)
+
+
+### Features
+
+* **gallery:** add metadata sidecar panel to lightbox ([#69](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/69)) ([8987089](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/8987089ac584428f7a6bb588dab646b710ff62c2))
+
 ## [1.6.5](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.6.4...v1.6.5) (2026-06-09)
 
 
