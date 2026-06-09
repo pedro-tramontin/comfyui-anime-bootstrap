@@ -1,4 +1,21 @@
-name: Release (build and push versioned image)
+name: Release (build and push all CUDA variants)
+
+# A new release tag (e.g. v1.6.3) triggers builds for ALL CUDA variants in
+# parallel. Each variant gets its own fully-qualified tag (e.g.
+# `v1.6.3-cuda13.0-pytorch2.12.0`). Only the default variant (cuda13.0 +
+# pytorch2.12.0, the "newest" combo) is also tagged `:latest` and the bare
+# version tag (e.g. `v1.6.3`) — the others stay as variant tags so
+# :latest points to the recommended default.
+#
+# Why matrix: the comfyui-anime-bootstrap image has historically shipped
+# with CUDA 13.0 + pytorch 2.12.0 (driver 580+). Older RunPod/Vast hosts
+# (RTX 3080/3090, A4000, etc.) often ship driver 535/545/550 and can't
+# load CUDA 13.0. Building all 4 variants on every release lets users
+# pick the right tag for their host without us hand-rolling new image
+# builds.
+#
+# To add a new variant: append a row to `CUDA_VARIANTS` below. The CI
+# will pick it up automatically — no other change needed.
 
 on:
   push:
@@ -7,9 +24,11 @@ on:
 
 env:
   IMAGE_REPO: ${{ github.event.repository.name }}
-  CUDA_VERSION: '13.0'
-  PYTORCH_VERSION: '2.12.0'
-  DRIVER_FLOOR: '12080'
+  # Default / "latest" variant. Also the only one that gets the bare
+  # `v<X>.<Y>.<Z>` tag and the `:latest` tag.
+  DEFAULT_CUDA: '13.0'
+  DEFAULT_PYTORCH: '2.12.0'
+  DEFAULT_DRIVER_FLOOR: '12080'   # 580.x driver supports CUDA 13.0
   # Docker Hub is the sole registry. The username and project name are
   # overridable via secrets so the workflow isn't tied to one account.
   # Required secrets (set in repo Settings → Secrets):
@@ -20,69 +39,133 @@ env:
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   DOCKERHUB_PROJECT_NAME: ${{ secrets.DOCKERHUB_PROJECT_NAME }}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  release:
-    name: build-release
+  build:
+    name: build (${{ matrix.variant.label }})
     runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel other variants if one fails — the user can still get
+      # a working subset.
+      fail-fast: false
+      matrix:
+        variant:
+          # The default (recommended) variant. Also gets bare tag + :latest.
+          - { cuda: '13.0', pytorch: '2.12.0', driver_floor: '12080', is_default: true  }
+          # Fallback variants for hosts with older NVIDIA drivers.
+          - { cuda: '12.8', pytorch: '2.9.1',  driver_floor: '570',  is_default: false }
+          - { cuda: '12.4', pytorch: '2.6.0',  driver_floor: '550',  is_default: false }
+          - { cuda: '12.1', pytorch: '2.5.1',  driver_floor: '535',  is_default: false }
     permissions:
       contents: read
+      attestations: write
+      id-token: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Read version
+      - name: Read version + set per-variant tags
         id: cfg
+        env:
+          IN_CUDA: ${{ matrix.variant.cuda }}
+          IN_PYTORCH: ${{ matrix.variant.pytorch }}
+          IN_IS_DEFAULT: ${{ matrix.variant.is_default }}
         run: |
           set -euo pipefail
           VERSION=$(cat version.txt | tr -d '[:space:]')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Building release ${VERSION} (cuda=${CUDA_VERSION}, pytorch=${PYTORCH_VERSION})"
+          CUDA="${IN_CUDA}"
+          PYTORCH="${IN_PYTORCH}"
+          PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
+          VARIANT_TAG="cuda${CUDA}-pytorch${PYTORCH}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to Docker Hub
-        if: env.DOCKER_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
-        uses: docker/login-action@v4
-        with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
-
-      - name: Build and push release image
-        run: |
-          set -euo pipefail
           # GitHub UI copy-paste of secrets often introduces trailing
           # whitespace/newlines. Strip them or the image tag will be invalid
           # (`***/*** :v1.4.0` with a literal space, see run 27104690093).
           DOCKER_USERNAME="${DOCKER_USERNAME//[[:space:]]/}"
           DOCKERHUB_TOKEN="${DOCKERHUB_TOKEN//[[:space:]]/}"
           DOCKERHUB_PROJECT_NAME="${DOCKERHUB_PROJECT_NAME//[[:space:]]/}"
-
           if [ -z "${DOCKER_USERNAME}" ] || [ -z "${DOCKERHUB_TOKEN}" ]; then
             echo "::error::DOCKER_USERNAME and DOCKERHUB_TOKEN secrets must be set to publish a release."
             exit 1
           fi
-
-          VERSION="${{ steps.cfg.outputs.version }}"
           DOCKERHUB_REPO="${DOCKERHUB_PROJECT_NAME:-${IMAGE_REPO}}"
           IMAGE="${DOCKER_USERNAME}/${DOCKERHUB_REPO}"
-          TAG="${IMAGE}:v${VERSION}"
-          LATEST="${IMAGE}:latest"
 
-          docker build \
-            --build-arg CUDA_VERSION="${CUDA_VERSION}" \
-            --build-arg PYTORCH_VERSION="${PYTORCH_VERSION}" \
-            --build-arg DRIVER_FLOOR="${DRIVER_FLOOR}" \
-            -t "${TAG}" \
-            .
+          # Tag list for this variant:
+          #   - Always:  ${variant}-tagged image (e.g. v1.6.3-cuda12.4-pytorch2.6.0)
+          #   - Default variant only: ALSO tag with bare version (v1.6.3) and :latest
+          TAGS="${IMAGE}:v${VERSION}-${VARIANT_TAG}"
+          if [ "${IN_IS_DEFAULT}" = "true" ]; then
+            TAGS="${TAGS},${IMAGE}:v${VERSION},${IMAGE}:latest"
+          fi
 
-          docker push "${TAG}"
-          docker tag "${TAG}" "${LATEST}"
-          docker push "${LATEST}"
+          {
+            printf 'version=%s\n'         "${VERSION}"
+            printf 'cuda=%s\n'            "${CUDA}"
+            printf 'pytorch=%s\n'         "${PYTORCH}"
+            printf 'pytorch_tag=%s\n'     "${PYTORCH_TAG}"
+            printf 'driver_floor=%s\n'    "${{ matrix.variant.driver_floor }}"
+            printf 'variant_tag=%s\n'     "${VARIANT_TAG}"
+            printf 'is_default=%s\n'      "${IN_IS_DEFAULT}"
+            printf 'image=%s\n'           "${IMAGE}"
+            printf 'tags=%s\n'            "${TAGS}"
+          } >> "$GITHUB_OUTPUT"
 
-          echo ""
-          echo "=== Release complete ==="
-          echo "Published v${VERSION}"
-          echo "  - ${TAG}"
-          echo "  - ${LATEST}"
+          echo "--- variant config ---"
+          echo "version:      v${VERSION}"
+          echo "cuda:         ${CUDA}"
+          echo "pytorch:      ${PYTORCH}"
+          echo "pytorch_tag:  ${PYTORCH_TAG}"
+          echo "driver_floor: ${{ matrix.variant.driver_floor }}"
+          echo "is_default:   ${IN_IS_DEFAULT}"
+          echo "image:        ${IMAGE}"
+          echo "tags:         ${TAGS}"
+          echo "------------------------"
+
+      - name: Verify base image exists on Docker Hub
+        run: |
+          echo "Verifying docker.io/pytorch/pytorch:${{ steps.cfg.outputs.pytorch_tag }} exists..."
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://hub.docker.com/v2/repositories/pytorch/pytorch/tags/${{ steps.cfg.outputs.pytorch_tag }}/")
+          if [ "$http_code" != "200" ]; then
+            echo "::error::pytorch/pytorch:${{ steps.cfg.outputs.pytorch_tag }} not found on Docker Hub (HTTP $http_code)"
+            echo "::error::Available tags: https://hub.docker.com/r/pytorch/pytorch/tags?name=cudnn9-runtime"
+            exit 1
+          fi
+          echo "Base image exists on Docker Hub"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Build and push to Docker Hub
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.cfg.outputs.tags }}
+          build-args: |
+            CUDA_VERSION=${{ steps.cfg.outputs.cuda }}
+            PYTORCH_VERSION=${{ steps.cfg.outputs.pytorch }}
+            DRIVER_FLOOR=${{ steps.cfg.outputs.driver_floor }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ steps.cfg.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
