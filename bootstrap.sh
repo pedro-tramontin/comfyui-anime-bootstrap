@@ -119,6 +119,7 @@ download_file() {
     local url="$2"
     local dest="$3"
     local auth_type="$4"
+    local download_client="${5:-aria2c}"
     local tmp="$dest.tmp"
     local timeout_sec=900   # hard cap per download; once hit, abandon to keep ComfyUI starting
 
@@ -178,23 +179,37 @@ download_file() {
         extra_args+=("--header=Authorization: Bearer $hf_token")
     fi
 
-    echo "  Downloading $name (${auth_type:-public}, aria2c)..."
-    timeout "$timeout_sec" aria2c \
-        --continue=false \
-        --max-connection-per-server=16 \
-        --split=8 \
-        --min-split-size=10M \
-        --dir="$(dirname "$tmp")" \
-        --out="$(basename "$tmp")" \
-        --allow-overwrite=true \
-        --console-log-level=warn \
-        "${extra_args[@]}" \
-        "$final_url" 2>&1 | tail -5
+    # Skip aria2c if the manifest entry opted into wget directly.
+    # Needed for civitai URLs whose 307 redirects to b2.civitai.com
+    # return 403 on the second hop with aria2c (the signed redirect
+    # URL gets rejected). wget follows the redirect cleanly because
+    # it makes a single GET that includes the original query string.
+    if [ "$download_client" = "wget" ]; then
+        echo "  Downloading $name (${auth_type:-public}, wget per manifest)..."
+        rc=1   # pretend aria2c failed; trigger the wget fallback below
+    else
+        echo "  Downloading $name (${auth_type:-public}, aria2c)..."
+        timeout "$timeout_sec" aria2c \
+            --continue=false \
+            --max-connection-per-server=16 \
+            --split=8 \
+            --min-split-size=10M \
+            --dir="$(dirname "$tmp")" \
+            --out="$(basename "$tmp")" \
+            --allow-overwrite=true \
+            --console-log-level=warn \
+            "${extra_args[@]}" \
+            "$final_url" 2>&1 | tail -5
 
-    local rc=$?
+        local rc=$?
+    fi
     if [ $rc -ne 0 ] || [ ! -s "$tmp" ]; then
         # Fallback to wget — only useful for trivial public URLs (wget breaks on HF xet-bridge)
-        echo "  [fallback] aria2c failed (rc=$rc), trying wget..."
+        if [ "$download_client" = "wget" ]; then
+            echo "  [wget] downloading..."
+        else
+            echo "  [fallback] aria2c failed (rc=$rc), trying wget..."
+        fi
         rm -f "$tmp"
         local wget_args=(--tries=2 --timeout=60 -O "$tmp")
         if [ "$auth_type" = "huggingface" ] && [ -n "$hf_token" ]; then
@@ -276,6 +291,7 @@ jq -c '.[] | arrays | .[] | select(has("url"))' "$MANIFEST" 2>/dev/null | while 
     dest_rel=$(echo "$line" | jq -r '.dest // ""')
     expect_size=$(echo "$line" | jq -r '.size // 0')
     auth_type=$(echo "$line" | jq -r '.auth // "none"')
+    download_client=$(echo "$line" | jq -r '.download_client // "aria2c"')
 
     dest="$MODELS_ROOT/$dest_rel"
 
@@ -302,7 +318,7 @@ jq -c '.[] | arrays | .[] | select(has("url"))' "$MANIFEST" 2>/dev/null | while 
     fi
 
     # Try to download (failures are logged but don't block)
-    download_file "$name" "$url" "$dest" "$auth_type" || true
+    download_file "$name" "$url" "$dest" "$auth_type" "$download_client" || true
 done
 
 # Final summary
