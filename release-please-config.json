@@ -10,7 +10,7 @@
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "extra-files": [
-        ".github/.release-please-template.md"
+        ".release-please-template.md"
       ]
     }
   }
