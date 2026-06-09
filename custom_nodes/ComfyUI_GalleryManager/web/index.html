@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ComfyUI Output Manager v5</title>
 <style>
-:root{--bg:#0b0b0b;--card:#161616;--text:#e6e6e6;--accent:#ff4757;--accent2:#2ed573;--border:#2a2a2a;--muted:#888;}
+:root{--bg:#0b0b0b;--card:#161616;--text:#e6e6e6;--accent:#ff4757;--accent2:#2ed573;--border:#2a2a2a;--muted:#888;--info:#5a9cff;--warn:#f0b54a;}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);}
 header{padding:1.2rem 1.5rem;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;}
@@ -21,7 +21,7 @@ header button.hidden-on{background:#444;color:var(--accent);}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;padding:1.5rem;}
 .card{background:var(--card);border-radius:8px;overflow:hidden;border:1px solid var(--border);transition:border-color .15s;position:relative;}
 .card:hover{border-color:var(--accent);}
-.card.selected{border-color:var(--accent2);box-shadow:0 0 0 2px var(--accent2);}
+.card.selected{border-color:var(--accent2);box-shadow:0 0 0 2px solid var(--accent2);}
 .card.hidden-file{opacity:.6;border-color:#333;}
 .card .thumb{position:relative;height:180px;background:#111;display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .card .thumb img{max-width:100%;max-height:100%;object-fit:cover;display:block;border-radius:4px;}
@@ -36,6 +36,12 @@ header button.hidden-on{background:#444;color:var(--accent);}
 .card .info input[type="checkbox"]{cursor:pointer;}
 .card .info .name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .card .info .name[contenteditable="true"]{background:#222;outline:none;padding:0 .2rem;border-radius:3px;}
+
+/* Metadata "card" preview under the image */
+.card .meta-preview{padding:.4rem .7rem .6rem;font-size:.7rem;color:#888;border-top:1px solid var(--border);background:rgba(0,0,0,.15);line-height:1.4;max-height:3.2em;overflow:hidden;}
+.card .meta-preview .m{color:#bbb;}
+.card .meta-preview .v{color:#fff;font-family:ui-monospace,monospace;}
+
 #lightbox{position:fixed;inset:0;background:rgba(0,0,0,.94);display:none;align-items:center;justify-content:center;z-index:100;}
 #lightbox .lb-wrap{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:100%;}
 #lightbox #mediaContainer{display:flex;align-items:center;justify-content:center;}
@@ -48,18 +54,56 @@ header button.hidden-on{background:#444;color:var(--accent);}
 #lightbox .nav .chevron{color:#fff;font-size:2.5rem;opacity:.5;}
 #lightbox .nav:hover .chevron{opacity:.9;}
 #lightbox .close{position:absolute;top:.6rem;right:1rem;font-size:2.2rem;color:#fff;cursor:pointer;z-index:6;}
+
+/* Metadata sidecar panel (right side of lightbox) */
+#metaPanel{position:absolute;top:0;right:0;bottom:0;width:min(420px,40vw);background:#0e0e0e;border-left:1px solid var(--border);overflow-y:auto;display:none;z-index:7;font-size:.85rem;padding:1rem 1.2rem 2rem;}
+#metaPanel.open{display:block;}
+#metaPanel .mp-header{display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;padding-bottom:.6rem;border-bottom:1px solid var(--border);position:sticky;top:0;background:#0e0e0e;z-index:2;}
+#metaPanel .mp-header h3{margin:0;font-size:1rem;flex:1;font-weight:600;}
+#metaPanel .mp-close{background:none;border:none;color:#888;font-size:1.4rem;cursor:pointer;padding:0 .4rem;}
+#metaPanel .mp-close:hover{color:#fff;}
+#metaPanel .mp-section{margin-bottom:.9rem;}
+#metaPanel .mp-section h4{margin:0 0 .35rem;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;}
+#metaPanel .mp-row{display:flex;gap:.4rem;padding:.18rem 0;align-items:baseline;}
+#metaPanel .mp-row .k{color:var(--muted);min-width:5.5rem;flex-shrink:0;font-size:.78rem;}
+#metaPanel .mp-row .v{color:var(--text);font-family:ui-monospace,monospace;font-size:.78rem;word-break:break-all;flex:1;}
+#metaPanel .mp-row .v.model{color:var(--info);}
+#metaPanel .mp-row .v.lora{color:var(--warn);}
+#metaPanel .mp-prompt{background:#161616;border:1px solid var(--border);border-radius:4px;padding:.5rem .6rem;font-size:.75rem;font-family:ui-monospace,monospace;max-height:7em;overflow-y:auto;white-space:pre-wrap;word-break:break-word;line-height:1.4;}
+#metaPanel .mp-prompt-block{margin-top:.3rem;}
+#metaPanel .mp-prompt-block .mp-prompt-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:.2rem;}
+#metaPanel .mp-prompt-label .lbl{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;}
+#metaPanel .mp-prompt-label .copy{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:.7rem;padding:.1rem .4rem;border-radius:3px;cursor:pointer;}
+#metaPanel .mp-prompt-label .copy:hover{color:#fff;border-color:#666;}
+#metaPanel .mp-prompt.negative{opacity:.85;}
+#metaPanel .mp-prompt.negative .lbl{color:#c66;}
+#metaPanel .mp-toggle{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:.75rem;padding:.3rem .6rem;border-radius:4px;cursor:pointer;width:100%;margin-top:.5rem;}
+#metaPanel .mp-toggle:hover{color:#fff;border-color:#666;}
+#metaPanel .mp-raw{display:none;background:#000;border:1px solid var(--border);border-radius:4px;padding:.6rem;font-size:.7rem;font-family:ui-monospace,monospace;max-height:20em;overflow:auto;white-space:pre-wrap;word-break:break-word;margin-top:.4rem;line-height:1.35;}
+#metaPanel .mp-raw.open{display:block;}
+#metaPanel .mp-loading{padding:1rem 0;color:var(--muted);font-size:.85rem;text-align:center;}
+#metaPanel .mp-error{padding:.6rem;background:#3a1a1a;border:1px solid #5a2a2a;border-radius:4px;color:#f88;font-size:.8rem;}
+
 #lightbox .dl{position:absolute;bottom:1rem;right:1rem;color:var(--accent);text-decoration:none;font-size:.85rem;z-index:6;background:rgba(0,0,0,.5);padding:.3rem .7rem;border-radius:4px;}
-#lightbox .counter{position:absolute;bottom:1rem;left:1rem;color:#fff;opacity:.6;font-size:.85rem;z-index:6;}
+#lightbox .meta-toggle{position:absolute;bottom:1rem;left:1rem;color:#fff;background:rgba(0,0,0,.5);padding:.3rem .7rem;border-radius:4px;border:1px solid #444;cursor:pointer;font-size:.8rem;z-index:6;display:flex;align-items:center;gap:.4rem;}
+#lightbox .meta-toggle:hover{background:rgba(0,0,0,.8);border-color:#888;}
+#lightbox .meta-toggle.active{background:var(--info);border-color:var(--info);color:#000;}
+#lightbox .counter{position:absolute;bottom:1rem;left:50%;transform:translateX(-50%);color:#fff;opacity:.6;font-size:.85rem;z-index:6;}
+
 #empty{text-align:center;padding:4rem 1rem;color:#666;font-size:1rem;}
 #toast{position:fixed;bottom:1rem;right:1rem;background:var(--card);border:1px solid var(--border);padding:.7rem 1rem;border-radius:6px;font-size:.85rem;z-index:200;opacity:0;transition:opacity .3s;}
 #toast.show{opacity:1;}
+
+@media (max-width: 900px) {
+  #metaPanel{width:100%;height:50%;top:auto;bottom:0;border-left:none;border-top:1px solid var(--border);}
+}
 </style>
 </head>
 <body>
 <header>
   <h1>ComfyUI Output Manager <span id="count" style="opacity:.5;font-size:.85rem;"></span></h1>
   <div id="breadcrumbs"></div>
-  <input id="search" type="text" placeholder="Search..." autocomplete="off">
+  <input id="search" type="text" placeholder="Search... (try seed, model, prompt text)" autocomplete="off">
   <button id="toggleHiddenBtn" class="secondary">Show Hidden</button>
   <button id="refreshBtn" class="secondary">Refresh</button>
   <button id="newFolderBtn" class="secondary">New Folder</button>
@@ -75,13 +119,24 @@ header button.hidden-on{background:#444;color:var(--accent);}
     <div id="mediaContainer"></div>
     <div class="nav next" onclick="goNext(event)"><span class="chevron">›</span></div>
   </div>
+  <button class="meta-toggle" id="metaToggle" onclick="toggleMetaPanel()" title="Show generation metadata (model, LoRA, seed, prompts)">
+    <span>📋</span><span>Metadata</span>
+  </button>
   <a class="dl" id="lb-dl" href="" target="_blank" download>Download</a>
   <div class="counter" id="lb-counter"></div>
+  <aside id="metaPanel">
+    <div class="mp-header">
+      <h3>Generation Metadata</h3>
+      <button class="mp-close" onclick="toggleMetaPanel()" title="Close">×</button>
+    </div>
+    <div id="metaBody"><div class="mp-loading">Loading…</div></div>
+  </aside>
 </div>
 <div id="toast"></div>
 <script>
 const API = '/gallery/api';
 let files = [], folders = [], selected = new Set(), currentPath = '', lbIndex = -1, showHidden = false, currentVideo = null;
+let metaOpen = false, currentMeta = null, metaCache = new Map();
 
 async function load() {
   let url = API + '/list';
@@ -112,6 +167,11 @@ function renderBreadcrumbs() {
 }
 
 function changePath(p) { currentPath = p; load(); }
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 function render() {
   const q = document.getElementById('search').value.toLowerCase();
@@ -152,6 +212,7 @@ function render() {
         <div class="overlay">
           <button onclick="event.stopPropagation();dl('${f.url}','${f.name}')">Download</button>
           <button onclick="event.stopPropagation();editName('${f.name}')">Rename</button>
+          <button onclick="event.stopPropagation();openLbWithMeta('${f.name}')">📋 Info</button>
         </div>
       </div>
       <div class="info">
@@ -159,10 +220,56 @@ function render() {
         <span class="name" id="n-${f.name}" onclick="editName('${f.name}')" title="Click to rename">${f.name}</span>
         <span style="margin-left:auto;opacity:.5;">${fmtSize(f.size)} &middot; ${timeAgo(f.mtime)}</span>
       </div>
+      <div class="meta-preview" id="mp-${cssEscape(f.name)}">${renderMetaPreview(f.name)}</div>
     </div>`;
   });
   grid.innerHTML = html;
   document.getElementById('delBtn').disabled = selected.size === 0;
+  // Kick off metadata fetches for visible image cards (small delay to let layout settle)
+  setTimeout(fetchAllCardPreviews, 100);
+}
+
+function cssEscape(s) { return s.replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+function renderMetaPreview(name) {
+  // Initial placeholder; replaced after async fetch
+  return '<span class="m">Loading metadata…</span>';
+}
+
+async function fetchAllCardPreviews() {
+  for (const f of files) {
+    if (f.is_video) continue;
+    const el = document.getElementById('mp-' + cssEscape(f.name));
+    if (!el) continue;
+    try {
+      const meta = await fetchMeta(f.name);
+      el.innerHTML = metaToPreviewHtml(meta);
+    } catch (e) {
+      el.innerHTML = '<span class="m" style="opacity:.5">No metadata</span>';
+    }
+  }
+}
+
+function metaToPreviewHtml(m) {
+  if (!m || m.error) return '<span class="m" style="opacity:.5">No metadata</span>';
+  const parts = [];
+  if (m.model) parts.push(`<span class="m">model:</span> <span class="v">${escapeHtml(m.model.replace(/\.safetensors$/,''))}</span>`);
+  if (m.lora) parts.push(`<span class="m">lora:</span> <span class="v">${escapeHtml(m.lora.replace(/\.safetensors$/,''))}${m.lora_strength!=null?` @${m.lora_strength}`:''}</span>`);
+  if (m.seed != null) parts.push(`<span class="m">seed:</span> <span class="v">${m.seed}</span>`);
+  if (m.steps || m.cfg) parts.push(`<span class="m">steps/cfg:</span> <span class="v">${m.steps||'?'} / ${m.cfg||'?'}</span>`);
+  if (m.width && m.height) parts.push(`<span class="m">size:</span> <span class="v">${m.width}×${m.height}</span>`);
+  return parts.join('<br>') || '<span class="m" style="opacity:.5">No metadata</span>';
+}
+
+async function fetchMeta(name) {
+  if (metaCache.has(name)) return metaCache.get(name);
+  let url = API + '/metadata?name=' + encodeURIComponent(name);
+  if (currentPath) url += '&subfolder=' + encodeURIComponent(currentPath);
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const m = await r.json();
+  metaCache.set(name, m);
+  return m;
 }
 
 function toggleHidden() {
@@ -193,6 +300,12 @@ function openLb(name) {
   updateLb();
   document.getElementById('lightbox').style.display='flex';
 }
+
+function openLbWithMeta(name) {
+  openLb(name);
+  toggleMetaPanel(true);
+}
+
 function updateLb() {
   if(lbIndex < 0 || lbIndex >= files.length) return;
   const f = files[lbIndex];
@@ -208,11 +321,119 @@ function updateLb() {
     container.innerHTML = `<img src="${f.url}" style="max-width:92vw;max-height:88vh;border-radius:6px;box-shadow:0 0 60px rgba(0,0,0,.8);cursor:pointer;" onclick="closeLb()">`;
     currentVideo = null;
   }
+  // Refresh metadata for the new file (if panel is open)
+  if (metaOpen) loadMetaPanel(f.name);
 }
+
+function toggleMetaPanel(force) {
+  const panel = document.getElementById('metaPanel');
+  const btn = document.getElementById('metaToggle');
+  metaOpen = (force === true) ? true : (force === false) ? false : !metaOpen;
+  panel.classList.toggle('open', metaOpen);
+  btn.classList.toggle('active', metaOpen);
+  if (metaOpen && lbIndex >= 0) {
+    const f = files[lbIndex];
+    loadMetaPanel(f.name);
+  }
+}
+
+async function loadMetaPanel(name) {
+  const body = document.getElementById('metaBody');
+  body.innerHTML = '<div class="mp-loading">Loading metadata for ' + escapeHtml(name) + '…</div>';
+  try {
+    const m = await fetchMeta(name);
+    currentMeta = m;
+    body.innerHTML = renderMetaPanel(m);
+  } catch (e) {
+    body.innerHTML = `<div class="mp-error">Failed to load metadata: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
+function renderMetaPanel(m) {
+  if (!m || m.error) {
+    return '<div class="mp-error">No metadata available for this file.</div>';
+  }
+  const hasPrompt = m.positive_prompt || m.negative_prompt;
+  const hasRaw = m.prompt_json || m.workflow_json;
+
+  // Build rows
+  const rows = [];
+  const push = (k, v, cls='') => v != null && v !== '' && rows.push(`<div class="mp-row"><span class="k">${k}</span><span class="v ${cls}">${escapeHtml(v)}</span></div>`);
+  push('Model', m.model, 'model');
+  if (m.lora) push('LoRA', m.lora + (m.lora_strength!=null?` @${m.lora_strength}`:''), 'lora');
+  push('Seed', m.seed);
+  push('Steps', m.steps);
+  push('CFG', m.cfg);
+  push('Sampler', m.sampler);
+  push('Scheduler', m.scheduler);
+  push('Size', (m.width && m.height) ? `${m.width} × ${m.height}` : null);
+  push('File', m.filename);
+  push('Size on disk', m.size_bytes != null ? fmtSize(m.size_bytes) : null);
+
+  let html = '<div class="mp-section"><h4>Generation</h4>' + rows.join('') + '</div>';
+
+  if (hasPrompt) {
+    html += '<div class="mp-section">';
+    if (m.positive_prompt) {
+      html += `<div class="mp-prompt-block">
+        <div class="mp-prompt-label"><span class="lbl">Positive prompt</span><button class="copy" onclick="copyText('positive')">Copy</button></div>
+        <div class="mp-prompt" id="mp-positive">${escapeHtml(m.positive_prompt)}</div>
+      </div>`;
+    }
+    if (m.negative_prompt) {
+      html += `<div class="mp-prompt-block">
+        <div class="mp-prompt-label"><span class="lbl">Negative prompt</span><button class="copy" onclick="copyText('negative')">Copy</button></div>
+        <div class="mp-prompt negative" id="mp-negative">${escapeHtml(m.negative_prompt)}</div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  if (hasRaw) {
+    html += `<button class="mp-toggle" onclick="toggleRawJson()">Show raw workflow JSON</button>
+    <div class="mp-raw" id="mp-raw">${escapeHtml(m.prompt_json || m.workflow_json || '')}</div>`;
+  }
+
+  return html;
+}
+
+function toggleRawJson() {
+  const el = document.getElementById('mp-raw');
+  if (!el) return;
+  el.classList.toggle('open');
+  const btn = el.previousElementSibling;
+  if (btn) btn.textContent = el.classList.contains('open') ? 'Hide raw workflow JSON' : 'Show raw workflow JSON';
+}
+
+function copyText(which) {
+  const el = document.getElementById('mp-' + which);
+  if (!el) return;
+  const text = el.textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => showToast('Copied ' + which + ' prompt to clipboard'),
+      () => fallbackCopy(text, which)
+    );
+  } else {
+    fallbackCopy(text, which);
+  }
+}
+
+function fallbackCopy(text, which) {
+  const ta = document.createElement('textarea');
+  ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); showToast('Copied ' + which + ' prompt'); } catch (e) { showToast('Copy failed'); }
+  document.body.removeChild(ta);
+}
+
 function closeLb() {
   if (currentVideo) { currentVideo.pause(); currentVideo = null; }
   document.getElementById('lightbox').style.display='none';
   lbIndex = -1;
+  metaOpen = false;
+  document.getElementById('metaPanel').classList.remove('open');
+  document.getElementById('metaToggle').classList.remove('active');
+  currentMeta = null;
 }
 function goPrev(e) { e.stopPropagation(); if(lbIndex > 0){ lbIndex--; updateLb(); } }
 function goNext(e) { e.stopPropagation(); if(lbIndex < files.length - 1){ lbIndex++; updateLb(); } }
@@ -256,6 +477,7 @@ document.addEventListener('keydown', e => {
   if(e.key==='ArrowLeft') goPrev({stopPropagation:()=>{}});
   if(e.key==='ArrowRight') goNext({stopPropagation:()=>{}});
   if(e.key===' ' && currentVideo) { e.preventDefault(); currentVideo.paused ? currentVideo.play() : currentVideo.pause(); }
+  if(e.key==='i' || e.key==='I') toggleMetaPanel();
 });
 load();
 </script>
