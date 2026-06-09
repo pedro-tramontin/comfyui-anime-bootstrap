@@ -61,8 +61,17 @@ jobs:
           - { cuda: '12.1', pytorch: '2.5.1',  driver_floor: '535',  is_default: false }
     permissions:
       contents: read
-      attestations: write
+      # `id-token: write` is required by docker/build-push-action@v7 to
+      # auto-generate the Sigstore OCI provenance attestation alongside the
+      # image. We rely on that built-in attestation (no explicit
+      # actions/attest-build-provenance step) — having both caused the
+      # second step to fail with "No credentials found for registry ***"
+      # because build-push-action's post-step had already logged out of
+      # Docker Hub by the time the explicit attest step ran.
       id-token: write
+      # `attestations: write` is needed to publish the GitHub Artifact
+      # Attestation (the slim SHA-pinned summary in the GH UI).
+      attestations: write
 
     steps:
       - name: Checkout
@@ -162,10 +171,9 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-name: ${{ steps.cfg.outputs.image }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
+          # Build the Sigstore OCI provenance in-line (no separate
+          # `actions/attest-build-provenance` step needed). `provenance:
+          # true` is the default but we set it explicitly so future
+          # maintainers don't accidentally disable it.
+          provenance: true
+          sbom: false
