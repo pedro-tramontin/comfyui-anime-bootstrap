@@ -46,6 +46,20 @@ LABEL com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor="${DRIVER_FLOOR}"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
+# Opt out of PEP 668 (externally-managed-environment) globally. The pytorch
+# base ships with Debian 12, which marks the system Python as externally
+# managed. This image owns a single Python with no shared system packages,
+# so the marker is advisory. Combined with /etc/pip.conf, this lets
+# third-party runtime installers (e.g. ComfyUI-Manager's auto-install of
+# GitPython) succeed without --break-system-packages flags. See pip.conf
+# for the rationale.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# System-wide pip config — see pip.conf for the full PEP 668 rationale.
+# MUST be installed before any `pip install` runs (i.e. before the
+# ComfyUI/ComfyUI-Manager pip install lines below). The file is read
+# by every `pip` invocation at both build and runtime.
+COPY pip.conf /etc/pip.conf
 
 # Runtime deps: git, wget, curl, openssh, aria2 (faster resume downloads),
 # ffmpeg (gallery video thumbnails).
