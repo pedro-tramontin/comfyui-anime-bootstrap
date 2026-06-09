@@ -53,7 +53,7 @@ Each image carries OCI labels so consumers can `docker inspect` to find the righ
 
 ### Registry
 
-The image is published to **Docker Hub** as `<DOCKER_USERNAME>/<DOCKERHUB_PROJECT_NAME or "comfyui-anime-bootstrap">:<tag>`.
+The image is published to **Docker Hub** as `<DOCKER_USERNAME>/<DOCKERHUB_PROJECT_NAME or "comfyui-anime-bootstrap">:<tag>`, e.g. `pedront/comfyui-anime-bootstrap:v1.7.5`.
 
 > We publish only to Docker Hub (not GHCR) because Docker Hub has better reachability from Vast.ai hosts and other GPU providers; many of them can't pull from `ghcr.io` reliably.
 
@@ -61,14 +61,12 @@ The image is published to **Docker Hub** as `<DOCKER_USERNAME>/<DOCKERHUB_PROJEC
 
 ```bash
 # List all available tags
-docker manifest inspect <dockerhub-image> | jq -r '.manifests[].digest'
-# e.g.
-docker manifest inspect pedrotramn/comfyui-anime-bootstrap | jq -r '.manifests[].digest'
+docker manifest inspect pedront/comfyui-anime-bootstrap | jq -r '.manifests[].digest'
 
 # Inspect a tag's driver floor
-docker pull pedrotramn/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+docker pull pedront/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 docker inspect --format '{{ index .Config.Labels "com.pedro-tramontin.comfyui-anime-bootstrap.driver-floor" }}' \
-  pedrotramn/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
+  pedront/comfyui-anime-bootstrap:cuda13.0-pytorch2.12.0
 # → 12080
 ```
 
@@ -110,7 +108,7 @@ Or just point the orchestrator at the skill's `models.json` and skip this step e
 docker run -it --gpus all \
   -e HF_TOKEN=***  -e MODELS_MANIFEST=/workspace/models.json \
   -v /path/to/models:/workspace/models \
-  pedrotramn/comfyui-anime-bootstrap:latest
+  pedront/comfyui-anime-bootstrap:latest
 ```
 
 ### 3. Wait for bootstrap
@@ -118,7 +116,7 @@ docker run -it --gpus all \
 The container will:
 1. Generate fresh SSH hostkeys
 2. Check `models.json` and download/resume any missing files
-3. `git pull` ComfyUI + Manager if older than 3 hours
+3. `git pull` ComfyUI + Manager if older than 6 hours
 4. Start ComfyUI on `0.0.0.0:8188`
 
 ## Environment Variables
@@ -154,7 +152,13 @@ pip install -r tests/requirements.txt
 pytest tests/integration_test.py -v --timeout=300
 ```
 
-In CI, tests execute against the freshly built `load: true` image **before** pushing to GHCR.
+In CI, tests execute against the freshly built `load: true` image **before** publishing to Docker Hub.
+
+## Release Notes
+
+Each release on GitHub includes a **Docker Images** section at the top of the body, with the `docker pull` command for the default variant (`:v<X>.<Y>.<Z>`) and all 4 CUDA fallback variants. This is injected post-publish by [`.github/workflows/inject-docker-pull-commands.yml`](.github/workflows/inject-docker-pull-commands.yml) so you can grab the right tag for your host's NVIDIA driver without digging through the changelog.
+
+Example release: <https://github.com/pedro-tramontin/comfyui-anime-bootstrap/releases/tag/v1.7.5>
 
 ## Building other variants
 
@@ -174,4 +178,4 @@ The workflow derives the `pytorch/pytorch:<X>-cuda<Y>-cudnn9-runtime` base tag f
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0), matching the upstream ComfyUI license.
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for the full text.

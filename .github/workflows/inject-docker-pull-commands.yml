@@ -38,13 +38,13 @@ jobs:
 
           {
             printf '## Docker Images\n\n'
-            printf '### `pedront/comfyui-anime-bootstrap:v%s` (default — driver 580+, CUDA 13.0, PyTorch 2.7.0)\n\n' "${VER}"
+            printf '### `pedront/comfyui-anime-bootstrap:v%s` (default — driver 580+, CUDA 13.0, PyTorch 2.12.0)\n\n' "${VER}"
             printf '```\ndocker pull pedront/comfyui-anime-bootstrap:v%s\n```\n\n' "${VER}"
             printf '### Fallback variants (older NVIDIA drivers)\n\n'
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.8-pytorch2.7.0` (driver 570+)\n' "${VER}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.8-pytorch2.9.1` (driver 570+)\n' "${VER}"
             printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.4-pytorch2.6.0` (driver 550+, e.g. RTX 3090/4090/A4000)\n' "${VER}"
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.1-pytorch2.6.0` (driver 535+)\n' "${VER}"
-            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda13.0-pytorch2.7.0` (driver 580+)\n\n' "${VER}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda12.1-pytorch2.5.1` (driver 535+)\n' "${VER}"
+            printf -- '- `docker pull pedront/comfyui-anime-bootstrap:v%s-cuda13.0-pytorch2.12.0` (driver 580+)\n\n' "${VER}"
             printf '%s\n' "${EXISTING}"
           } > /tmp/release-body.md
 
