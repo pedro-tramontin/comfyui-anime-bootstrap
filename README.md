@@ -34,14 +34,22 @@ The gallery features:
 
 ## Base images & tags
 
-The image is built from one `pytorch/pytorch` base per run. Each image carries OCI labels so consumers can `docker inspect` to find the right tag for their host's driver.
+Every release produces **4 CUDA variants** in parallel (one per supported driver floor). The matrix lives in [`.github/workflows/release.yml`](.github/workflows/release.yml) — to add a new variant, append a row to the `CUDA_VARIANTS` matrix there.
+
+Each image carries OCI labels so consumers can `docker inspect` to find the right tag for their host's driver.
 
 | Tag | PyTorch | CUDA | NVIDIA driver floor | Use when |
 |---|---|---|---|---|
-| `latest` (alias of `cuda13.0-pytorch2.12.0`) | 2.12.0 | 13.0 | 12080 | Most recent — default for new hosts with current NVIDIA drivers |
-| `cuda13.0-pytorch2.12.0` | 2.12.0 | 13.0 | 12080 | Pin to this tag explicitly |
+| `latest` (alias of `v<X>.<Y>.<Z>-cuda13.0-pytorch2.12.0`) | 2.12.0 | 13.0 | 580+ (≥12080) | Most recent — default for new hosts with current NVIDIA drivers (H100, RTX 5090, B200) |
+| `v<X>.<Y>.<Z>-cuda13.0-pytorch2.12.0` | 2.12.0 | 13.0 | 580+ | Pin to a specific version + CUDA 13.0 |
+| `v<X>.<Y>.<Z>-cuda12.8-pytorch2.9.1`  | 2.9.1  | 12.8 | 570+ | Older datacenter / consumer cards (RTX 4090 on driver 570) |
+| `v<X>.<Y>.<Z>-cuda12.4-pytorch2.6.0`  | 2.6.0  | 12.4 | 550+ | Common RunPod / Vast.ai GPUs (RTX 3090, A4000, A5000, RTX 4080) |
+| `v<X>.<Y>.<Z>-cuda12.1-pytorch2.5.1`  | 2.5.1  | 12.1 | 535+ | Oldest supported — RTX 3080, RTX 3070, V100, older A4000 |
 
-> **Older bases:** to publish a variant for an older driver, re-trigger the GitHub Actions workflow manually (Actions → Build and Push → Run workflow) and change the inputs. The image gets tagged `cuda<X>-pytorch<Y>` and (optionally) `:latest`.
+> **Only the default variant (cuda13.0) gets the bare `v<X>.<Y>.<Z>` and `:latest` tags.** The other variants are versioned (e.g. `v1.6.3-cuda12.4-pytorch2.6.0`) so users on older drivers get a stable pin to a specific CUDA + PyTorch combo. Pick the variant matching your host's NVIDIA driver — running with a too-new CUDA yields "CUDA driver version is insufficient" errors at `torch.cuda.init()`.
+
+> **Ad-hoc builds:** to publish a one-off variant without cutting a release, run the **Build and Push** workflow (Actions → Build and Push → Run workflow) with custom `cuda` / `pytorch` / `tag_prefix` inputs. The resulting tag is `cuda<X>-pytorch<Y>` (no `v<X>.<Y>.<Z>` prefix unless you set `tag_prefix`).
+
 
 ### Registry
 
