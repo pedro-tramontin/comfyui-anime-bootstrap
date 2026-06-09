@@ -13,16 +13,6 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      # Diagnostic: confirm the secret contains the new PAT (not a stale value).
-      # Prints only the first 4 chars ("github_pat_11A..." prefix); the rest
-      # is masked by GitHub's log scrubber. Remove this step once PAT issue is
-      # resolved.
-      - name: Debug secret prefix
-        env:
-          FULL_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-        run: |
-          echo "Token starts with: ${FULL_TOKEN:0:20}..."
-          echo "Token length: ${#FULL_TOKEN}"
       - uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
