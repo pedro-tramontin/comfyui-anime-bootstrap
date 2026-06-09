@@ -1,0 +1,67 @@
+name: Inject Docker pull commands into release notes
+
+# Runs after release-please publishes a new release and rewrites the body
+# to include the full set of `docker pull` commands (default + 4 CUDA
+# fallback variants) above the auto-generated changelog.
+#
+# Why a separate workflow: release-please-action@v5 has no first-class
+# option to override the release body, so we just edit it post-hoc.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  inject-pull-commands:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read existing release body
+        id: read
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"   # strip leading 'v' for substitution
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          EXISTING=$(gh release view "${VERSION}" --json body --jq '.body')
+          {
+            echo "existing<<EOF"
+            echo "${EXISTING}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compose new body with pull commands
+        id: compose
+        env:
+          EXISTING: ${{ steps.read.outputs.existing }}
+          VERSION: ${{ steps.read.outputs.version }}
+        run: |
+          cat > /tmp/release-body.md <<BODY
+          ## Docker Images
+
+          ### \`pedront/comfyui-anime-bootstrap:v${VERSION}\` (default — driver 580+, CUDA 13.0, PyTorch 2.7.0)
+
+          \`\`\`
+          docker pull pedront/comfyui-anime-bootstrap:v${VERSION}
+          \`\`\`
+
+          ### Fallback variants (older NVIDIA drivers)
+
+          - \`docker pull pedront/comfyui-anime-bootstrap:v${VERSION}-cuda12.8-pytorch2.7.0\` (driver 570+)
+          - \`docker pull pedront/comfyui-anime-bootstrap:v${VERSION}-cuda12.4-pytorch2.6.0\` (driver 550+, e.g. RTX 3090/4090/A4000)
+          - \`docker pull pedront/comfyui-anime-bootstrap:v${VERSION}-cuda12.1-pytorch2.6.0\` (driver 535+)
+          - \`docker pull pedront/comfyui-anime-bootstrap:v${VERSION}-cuda13.0-pytorch2.7.0\` (driver 580+)
+
+          ${EXISTING}
+          BODY
+
+      - name: Update release body
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          gh release edit "${{ github.event.release.tag_name }}" --notes-file /tmp/release-body.md
