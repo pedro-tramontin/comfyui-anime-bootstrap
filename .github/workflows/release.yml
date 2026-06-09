@@ -83,9 +83,16 @@ jobs:
           IN_CUDA: ${{ matrix.variant.cuda }}
           IN_PYTORCH: ${{ matrix.variant.pytorch }}
           IN_IS_DEFAULT: ${{ matrix.variant.is_default }}
+          # Pass the git tag (e.g. v1.6.4) explicitly so we always use the
+          # triggering tag as the image-tag namespace. Do NOT use
+          # version.txt here — release-please bumps it just-in-time and a
+          # race between file state and tag push could otherwise cause the
+          # v<X>.<Y>.<Z> docker tag to lag behind (or lead) the git tag.
+          IN_GIT_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          VERSION=$(cat version.txt | tr -d '[:space:]')
+          # Strip the leading "v" from the git tag (e.g. "v1.6.4" → "1.6.4").
+          VERSION="${IN_GIT_TAG#v}"
           CUDA="${IN_CUDA}"
           PYTORCH="${IN_PYTORCH}"
           PYTORCH_TAG="${PYTORCH}-cuda${CUDA}-cudnn9-runtime"
