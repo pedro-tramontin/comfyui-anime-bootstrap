@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to Docker Hub (`pedrotramn/comfyui-anime-bootstrap`) with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.6.3](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.6.2...v1.6.3) (2026-06-09)
+
+
+### Bug Fixes
+
+* **bootstrap:** honor per-entry download_client field (civitai b2 redirect) ([#62](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/62)) ([f6f5fb4](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/f6f5fb4bbeec2809b895911f3b7d8d40cd9e3c0d))
+
 ## [1.6.2](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.6.1...v1.6.2) (2026-06-09)
 
 
