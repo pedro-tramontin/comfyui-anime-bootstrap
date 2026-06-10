@@ -1,17 +1,21 @@
 {
+  "_comment": "Authoritative model manifest for the comfyui-anime-bootstrap image. Each entry's 'sha256' is the SERVER-PUBLISHED content hash (HF tree API for HF models, CivitAI /api/v1/model-versions/{id} for CivitAI models). Bootstrap verifies each file by hashing it and comparing to the manifest hash. The 'models-hashes.json' sidecar caches verified hashes on the volume so subsequent boots don't re-hash 6+ GB files — see tests/test_sha256_verification.py for the contract.",
+
   "checkpoints": [
     {
       "name": "animagine-xl-4.0",
       "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
       "dest": "checkpoints/animagine-xl-4.0.safetensors",
       "size": 6938434056,
+      "sha256": "1d5b43ff75b6ab598502d4c779d2fbfa3dceca51c60c3b609640a60772333916",
       "auth": "huggingface"
     },
     {
       "name": "pony-diffusion-v6-xl",
       "url": "https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
       "dest": "checkpoints/ponyDiffusionV6XL_v6StartWithThisOne.safetensors",
-      "size": 6938040794,
+      "size": 6938041050,
+      "sha256": "67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3",
       "auth": "huggingface"
     },
     {
@@ -19,6 +23,7 @@
       "url": "https://civitai.com/api/download/models/1887507?token=${CIVITAI_API_KEY}",
       "dest": "checkpoints/illumiyumeXL_v35VPred.safetensors",
       "size": 6938040794,
+      "sha256": "785b4b6dd828a0da605543bb673ff9d107d5a68a7e452372ec3dc82595481dcb",
       "auth": "civitai"
     },
     {
@@ -26,6 +31,7 @@
       "url": "https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/resolve/main/NetaYume_v4_all_in_one.safetensors",
       "dest": "checkpoints/NetaYume_v4_all_in_one.safetensors",
       "size": 10620229821,
+      "sha256": "e2b277eedf4fe15e1c27fd101990053314725a6eb8ee370bd486d132c04455bf",
       "auth": "huggingface"
     },
     {
@@ -33,6 +39,7 @@
       "url": "https://civitai.com/api/download/models/2883731?token=${CIVITAI_API_KEY}",
       "dest": "checkpoints/waiIllustriousSDXL_v170.safetensors",
       "size": 6938040794,
+      "sha256": "f116b0c78ff441467b0cdc8f1936e1ed18ea31e9997c7b132b1b8db533f0bd04",
       "auth": "civitai"
     }
   ],
@@ -40,8 +47,9 @@
     {
       "name": "sadamoto-yoshiyuki-xl-v3",
       "url": "https://civitai.com/api/download/models/2328182?token=${CIVITAI_API_KEY}",
-      "dest": "loras/Sadamoto_Yoshiyuki_XL_V3.safetensors",
+      "dest": "loras/Sadamoto_Yoshiyuki_Style-Illustrious-V1.0.safetensors",
       "size": 27837028,
+      "sha256": "06cac225fa44e1a6677b366e1527a6ba1a9f0c0793acb1a6beca24f24d309ceb",
       "auth": "civitai"
     }
   ]

@@ -94,11 +94,14 @@ That file is the source of truth for which models to download in a real run. Edi
       "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
       "dest": "checkpoints/animagine-xl-4.0.safetensors",
       "size": 6938040794,
+      "sha256": "1d5b43ff75b6ab598502d4c779d2fbfa3dceca51c60c3b609640a60772333916",
       "auth": "huggingface"
     }
   ]
 }
 ```
+
+The `sha256` field is the **strong check** — when present, `bootstrap.sh` hashes each local model and only considers it "present" if the hash matches what's in the manifest. This catches silent corruption, partial downloads, and "wrong file with the right size" cases that the old size-only check missed. Get the hash from the source: HuggingFace exposes it via the [tree API](https://huggingface.co/api/models/{repo_id}/tree/{revision}) (`siblings[].lfs.oid`), CivitAI via `/api/v1/models/{id}` (`modelVersions[].files[].hashes.SHA256`). Omit `sha256` (or set it to `null`) to fall back to the legacy size match — `bootstrap.sh` will hash the file on first download and persist the result to `/workspace/models-hashes.json` so subsequent boots use the strong check.
 
 Or just point the orchestrator at the skill's `models.json` and skip this step entirely.
 

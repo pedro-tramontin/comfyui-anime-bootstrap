@@ -1,14 +1,17 @@
 {
   "_comment": "Minimal fallback model manifest baked into the Docker image. Used by bootstrap.sh ONLY when /workspace/models.json does not exist on the volume (i.e. first-time users with no orchestrator pre-staging). For real runs, the orchestrator (e.g. asuka_multi_model_smoke.py in the cloud-ai-image-generation skill) writes the full multi-model manifest onto the network volume BEFORE the pod starts, and this file is ignored.",
 
+  "_hash_legend": "sha256 (lowercase hex) is the SERVER-PUBLISHED content hash — sourced from HF tree API (LFS sibling oid) or CivitAI /api/v1/model-versions/{id} (files[].hashes.SHA256). Bootstrap verifies each local file by hashing it and comparing. Verified hashes are cached in /workspace/models-hashes.json, keyed by the manifest sha256 — so a server-side change invalidates the cache automatically.",
+
   "checkpoints": [
     {
       "name": "animagine-xl-4.0",
       "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
       "dest": "checkpoints/animagine-xl-4.0.safetensors",
-      "size": 6938040794,
+      "size": 6938434056,
+      "sha256": "1d5b43ff75b6ab598502d4c779d2fbfa3dceca51c60c3b609640a60772333916",
       "auth": "huggingface",
-      "note": "Single worked example. Public HF repo (no auth strictly required; the bootstrap always sends the Authorization header when auth=huggingface). To run a multi-model pipeline, drop a real models.json at /workspace/models.json on the volume and this file will be ignored."
+      "note": "Single worked example. Public HF repo (no auth strictly required; the bootstrap always sends the Authorization header when auth=huggingface). The sha256 was obtained from https://huggingface.co/api/models/cagliostrolab/animagine-xl-4.0/tree/main (siblings[].lfs.oid). To run a multi-model pipeline, drop a real models.json at /workspace/models.json on the volume and this file will be ignored."
     }
   ],
 
@@ -16,10 +19,11 @@
     {
       "name": "illustrious-style-sdxl",
       "url": "https://civitai.com/api/download/models/391692?token=${CIVITAI_API_KEY}",
-      "dest": "loras/Sadamoto_Yoshiyuki_XL_PONY.safetensors",
+      "dest": "loras/illustrious_style_sdxl.safetensors",
       "size": 359000000,
+      "sha256": null,
       "auth": "civitai",
-      "note": "Sadamoto Yoshiyuki XL LoRA. Optional, only used by the Animagine workflow template."
+      "note": "Placeholder example showing the sha256=null fallback path: when no server hash is known, bootstrap falls back to size match. Set sha256 to a real value (fetched from CivitAI /api/v1/model-versions/{id} -> files[].hashes.SHA256) for the strong check."
     }
   ],
 
