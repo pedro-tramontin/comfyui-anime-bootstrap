@@ -4,6 +4,13 @@ All notable changes to the comfyui-anime-bootstrap image are documented here.
 
 Versions follow [Semantic Versioning](https://semver.org/). On each release the image is built from the default variant in `variants.json` and published to Docker Hub (`pedrotramn/comfyui-anime-bootstrap`) with the `v<MAJOR>.<MINOR>.<PATCH>` and `:latest` tags. Other variants in `variants.json` are built manually on request.
 
+## [1.8.0](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.7.4...v1.8.0) (2026-06-10)
+
+
+### Features
+
+* **bootstrap:** SHA256-strong verification of model files ([#84](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/issues/84)) ([1e7c7f3](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/commit/1e7c7f3358f95fee915f8d11a8447ab02be991c3))
+
 ## [1.7.4](https://github.com/pedro-tramontin/comfyui-anime-bootstrap/compare/v1.7.3...v1.7.4) (2026-06-09)
 
 
