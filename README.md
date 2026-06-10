@@ -93,7 +93,7 @@ That file is the source of truth for which models to download in a real run. Edi
       "name": "animagine-xl-4.0",
       "url": "https://huggingface.co/cagliostrolab/animagine-xl-4.0/resolve/main/animagine-xl-4.0.safetensors",
       "dest": "checkpoints/animagine-xl-4.0.safetensors",
-      "size": 6938040794,
+      "size": 6938434056,
       "sha256": "1d5b43ff75b6ab598502d4c779d2fbfa3dceca51c60c3b609640a60772333916",
       "auth": "huggingface"
     }
@@ -101,9 +101,9 @@ That file is the source of truth for which models to download in a real run. Edi
 }
 ```
 
-The `sha256` field is the **strong check** — when present, `bootstrap.sh` hashes each local model and only considers it "present" if the hash matches what's in the manifest. This catches silent corruption, partial downloads, and "wrong file with the right size" cases that the old size-only check missed. Get the hash from the source: HuggingFace exposes it via the [tree API](https://huggingface.co/api/models/{repo_id}/tree/{revision}) (`siblings[].lfs.oid`), CivitAI via `/api/v1/models/{id}` (`modelVersions[].files[].hashes.SHA256`). Omit `sha256` (or set it to `null`) to fall back to the legacy size match — `bootstrap.sh` will hash the file on first download and persist the result to `/workspace/models-hashes.json` so subsequent boots use the strong check.
+The `sha256` field is the **strong check** — when present, `bootstrap.sh` hashes each local model and only considers it "present" if the hash matches what's in the manifest. This catches silent corruption, partial downloads, and "wrong file with the right size" cases that the old size-only check missed. Get the hash from the source: HuggingFace exposes it via the [tree API](https://huggingface.co/api/models/{repo_id}/tree/{revision}) (`siblings[].lfs.oid`), CivitAI via `/api/v1/model-versions/{versionId}` (`files[].hashes.SHA256` — note: it's the *version* endpoint, not `/api/v1/models/{modelId}`, which 404s for the legacy `/api/download/models/{N}` URLs that point at versions). Omit `sha256` (or set it to `null`) to fall back to the legacy size match — `bootstrap.sh` will hash the file on first download and persist the result to `/workspace/models-hashes.json` so subsequent boots use the strong check.
 
-Or just point the orchestrator at the skill's `models.json` and skip this step entirely.
+> **Where the operational manifest lives:** the `models.json` in this repo's working tree is gitignored — it's the single-user operational manifest for the orchestrator's multi-model runs. For an in-repo *example* see `models-template.json`. The `cloud-ai-image-generation` skill's orchestrator writes the real `models.json` onto the network volume before the pod starts.
 
 ### 2. Launch (example: RunPod)
 

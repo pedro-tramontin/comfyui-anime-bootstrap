@@ -1,1 +1,13 @@
 __pycache__/
+
+# Operational manifest: written by the orchestrator to the network
+# volume at /workspace/models.json.  This is a single-user file with
+# the actual model roster for our pipeline — NOT a public example.
+# For an example manifest, see models-template.json (which IS in the
+# repo and IS committed).
+models.json
+
+# Sidecar populated by bootstrap.sh at runtime in /workspace/.
+# Caches verified hashes for the strong-check fast path; never
+# committed, never shared.
+models-hashes.json
